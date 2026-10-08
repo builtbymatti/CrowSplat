@@ -41,7 +41,11 @@ from app.gui.widgets.dialog_utils import get_existing_directory, get_open_file_n
 from app.gui.widgets.drop_line_edit import DropLineEdit
 from app.gui.widgets.progress_ring import ProgressRing
 
-_BLUR_STRENGTHS = (("light", "Léger"), ("medium", "Moyen"), ("strong", "Fort"))
+_BLUR_STRENGTHS = (
+    ("light", "strength_light", "Léger"),
+    ("medium", "strength_medium", "Moyen"),
+    ("strong", "strength_strong", "Fort"),
+)
 # Target for images the chain cannot read natively (HEIC, TIFF, BMP, WebP…).
 # "off" copies them untouched, which every downstream tool then refuses —
 # offered because a user may want the originals passed through deliberately.
@@ -287,8 +291,8 @@ class SourcePanel:
         blur_row = QHBoxLayout()
         self.lbl_blur = QLabel()
         self.combo_blur = QComboBox()
-        for value, _label in _BLUR_STRENGTHS:
-            self.combo_blur.addItem(value, value)
+        for value, key, default in _BLUR_STRENGTHS:
+            self.combo_blur.addItem(tr(key, default), value)
         self.combo_blur.setCurrentIndex(1)  # medium
         blur_row.addWidget(self.lbl_blur)
         blur_row.addWidget(self.combo_blur)
@@ -558,6 +562,8 @@ class SourcePanel:
 
     # ── i18n ────────────────────────────────────────────────────────────────────
     def retranslate_ui(self):
+        for i, (_value, key, default) in enumerate(_BLUR_STRENGTHS):
+            self.combo_blur.setItemText(i, tr(key, default))
         self.lbl_project.setText(tr("label_project_name", "Nom du projet"))
         self.lbl_mode.setText(tr("topbar_mode", "Mode :"))
         for i, (value, key, default) in enumerate(PIPELINE_MODES):

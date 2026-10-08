@@ -1,10 +1,9 @@
 """Custom Brush presets, persisted and named by the user.
 
-Complements the built-in presets (``BRUSH_PRESETS``, the existing Strategy
-pattern on the CLI side) without duplicating or moving them: this module only
-handles *user* presets. The calling code merges both through
-:func:`merge_presets`, passing the built-in presets as an argument, which avoids
-a ``core → cli`` dependency (an inverted layer).
+Holds the built-in Brush defaults and presets (``BRUSH_DEFAULTS``,
+``BRUSH_PRESETS``) shared by the CLI and the GUI, plus the *user* presets. The
+calling code merges both through :func:`merge_presets`, passing the built-in
+presets as an argument.
 
 Storage: a dedicated ``brush_presets.json`` file at the root, next to the
 ``config.json`` managed by ``SessionManager``.
@@ -17,6 +16,40 @@ from .config_io import is_safe_config_name
 from .system import resolve_project_root
 
 logger = logging.getLogger(__name__)
+
+
+BRUSH_DEFAULTS = {
+    "total_steps": 30000,
+    "sh_degree": 3,
+    "start_iter": 0,
+    "refine_every": 200,
+    "growth_grad_threshold": 0.003,
+    "growth_select_fraction": 0.2,
+    "growth_stop_iter": 15000,
+    "max_splats": 10_000_000,
+    "checkpoint_interval": 7000,
+    "max_resolution": 0,
+    "with_viewer": False,
+    "refine_mode": False,
+}
+
+BRUSH_PRESETS = {
+    "fast": {
+        "total_steps": 7000, "refine_every": 100,
+        "growth_grad_threshold": 0.01, "growth_select_fraction": 0.2,
+        "growth_stop_iter": 6000,
+    },
+    "std": {
+        "total_steps": 30000, "refine_every": 200,
+        "growth_grad_threshold": 0.003, "growth_select_fraction": 0.2,
+        "growth_stop_iter": 15000,
+    },
+    "dense": {
+        "total_steps": 50000, "refine_every": 100,
+        "growth_grad_threshold": 0.0005, "growth_select_fraction": 0.6,
+        "growth_stop_iter": 40000,
+    },
+}
 
 
 def _store_path():

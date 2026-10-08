@@ -1,6 +1,7 @@
 import json
 import logging
 
+from app.core.atomic_io import read_json_dict, update_json_file
 from app.core.system import resolve_project_root
 
 logger = logging.getLogger(__name__)
@@ -68,21 +69,19 @@ class LanguageManager:
         config_file = resolve_project_root() / "config.json"
         try:
             if config_file.exists():
-                with open(config_file) as f:
-                    config = json.load(f)
-                    saved = config.get("language")
-                    if is_known_lang(saved):
-                        self.current_lang = saved
-                    else:
-                        logger.warning(
-                            "Langue invalide dans %s (%r) — repli sur %s",
-                            config_file, saved, DEFAULT_LANG,
-                        )
-                        self.current_lang = DEFAULT_LANG
-                    logger.info(
-                        "Langue chargée au démarrage : %s (depuis %s, clé 'language'=%r)",
-                        self.current_lang, config_file, saved,
+                saved = read_json_dict(config_file).get("language")
+                if is_known_lang(saved):
+                    self.current_lang = saved
+                else:
+                    logger.warning(
+                        "Langue invalide dans %s (%r) — repli sur %s",
+                        config_file, saved, DEFAULT_LANG,
                     )
+                    self.current_lang = DEFAULT_LANG
+                logger.info(
+                    "Langue chargée au démarrage : %s (depuis %s, clé 'language'=%r)",
+                    self.current_lang, config_file, saved,
+                )
             else:
                 logger.info(
                     "Langue au démarrage : %s (défaut — %s introuvable)",
@@ -97,17 +96,9 @@ class LanguageManager:
     def save_config(self):
         try:
             config_file = resolve_project_root() / "config.json"
-            config = {}
-            if config_file.exists():
-                with open(config_file) as f:
-                    existing = json.load(f)
-                    if isinstance(existing, dict):
-                        config = existing
-            config["language"] = self.current_lang
-            with open(config_file, "w") as f:
-                json.dump(config, f, indent=2)
+            update_json_file(config_file, language=self.current_lang)
             logger.info("Langue enregistrée : %s (dans %s)", self.current_lang, config_file)
-        except (OSError, json.JSONDecodeError) as e:
+        except OSError as e:
             logger.warning("Could not save language config to %s: %s", config_file, e)
 
     def set_language(self, lang_code):

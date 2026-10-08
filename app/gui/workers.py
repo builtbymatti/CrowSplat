@@ -5,7 +5,7 @@ import time
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QMutex, QMutexLocker, QWaitCondition, Signal
+from PySide6.QtCore import QMutex, QMutexLocker, QThread, QWaitCondition, Signal
 
 from app.core.brush_engine import BrushEngine
 from app.core.brush_refine import (
@@ -18,11 +18,13 @@ from app.core.extractor_360_engine import Extractor360Engine
 from app.core.four_dgs_engine import FourDGSEngine
 from app.core.i18n import tr
 from app.core.ply_cleaner import CleaningCancelled, clean_ply
+from app.core.upscale_engine import UpscaleEngine, run_upscale_job
 from app.gui.base_worker import BaseWorker
 
 # Checkpoint identification lives in chaining_logic (Qt-free) so the CLI can
 # apply the same rule; re-exported here for the existing call sites.
 from app.gui.chaining_logic import find_checkpoint_plys, is_checkpoint_ply
+from app.upscayl_models import get_model
 
 
 class Extractor360Worker(BaseWorker):
@@ -454,53 +456,13 @@ class SharpWorker(BaseWorker):
 
     def run(self):
         try:
-            # Handle Upscale
             if self.params.get("upscale", False):
-                from app.upscayl_manager import find_binary, run_upscayl
-                if find_binary():
-                    self.log_signal.emit(tr("status_upscaling", "--- Upscale Image ---"))
-                    input_path = Path(self.input_path)
-                    output_path = Path(self.output_path)
-                    if input_path.is_file():
-                        temp_dir = output_path / "temp_upscale"
-                        temp_dir.mkdir(parents=True, exist_ok=True)
-                        fmt = self.params.get("format", "png")
-                        model_id = self.params.get("model_id") or ""
-                        if not model_id:
-                            from app.upscayl_manager import get_models_dir
-                            from app.upscayl_models import get_downloaded_models
-                            _dl = get_downloaded_models(get_models_dir())
-                            model_id = _dl[0].id if _dl else ""
-                        if model_id:
-                            # upscayl-bin operates on folders; use a temp input folder
-                            tmp_in = temp_dir / "_in"
-                            tmp_in.mkdir(exist_ok=True)
-                            shutil.copy2(input_path, tmp_in / input_path.name)
-                            upscale_params = {
-                                "model_id":    model_id,
-                                "scale":       self.params.get("scale", 4),
-                                "format":      fmt,
-                                "tile":        self.params.get("tile", 0),
-                                "tta":         self.params.get("tta", False),
-                                "compression": self.params.get("compression", 0),
-                            }
-                            success = [False]
-                            run_upscayl(str(tmp_in), str(temp_dir), upscale_params,
-                                        log_callback=self.log_signal.emit,
-                                        done_callback=lambda ok: success.__setitem__(0, ok),
-                                        cancel_check=self.isInterruptionRequested)
-                            upscaled_path = temp_dir / (input_path.stem + "." + fmt)
-                            if success[0] and upscaled_path.exists():
-                                self.input_path = str(upscaled_path)
-                                self.log_signal.emit(tr("status_upscale_done", "Upscale done. Launching Sharp..."))
-                            else:
-                                self.log_signal.emit(tr("err_upscale_failed", "Upscale failed. Using original image."))
-                        else:
-                            self.log_signal.emit("⚠ Upscale activé mais aucun modèle disponible — ignoré.")
-                    else:
-                        self.log_signal.emit(tr("err_upscale_folder", "Folder upscale not supported in Sharp mode."))
-                else:
-                    self.log_signal.emit(tr("err_upscale_missing", "Error: Upscale requested but upscayl-bin not found."))
+                from app.core.sharp_upscale import preupscale_image
+                upscaled = preupscale_image(
+                    self.input_path, self.output_path, self.params,
+                    self.log_signal.emit, cancel_check=self.isInterruptionRequested)
+                if upscaled:
+                    self.input_path = str(upscaled)
 
             # Use refactored predict method
             self.status_signal.emit(tr("status_sharp", "Amélioration avec ML Sharp..."))
@@ -846,3 +808,121 @@ class ExportWorker(BaseWorker):
             else f"Export partiel : {success_count}/{total} réussis"
         )
         self.finished_signal.emit(success_count == total, msg)
+
+
+class ModelDownloadWorker(QThread):
+    """Downloads a model's .bin/.param files off the GUI thread.
+
+    ``download_model_files`` makes blocking network requests (up to a 120s
+    timeout per file): calling it directly from a Qt slot would freeze the
+    interface.
+    """
+
+    log_signal = Signal(str)
+    finished_signal = Signal(bool, str)
+
+    def __init__(self, model_id: str):
+        super().__init__()
+        self.model_id = model_id
+
+    def run(self):
+        from app.upscayl_manager import download_model_files
+
+        model = get_model(self.model_id)
+        if model is None:
+            self.finished_signal.emit(False, self.model_id)
+            return
+        try:
+            ok = download_model_files(
+                model.url_bin, model.url_param, model.id,
+                log_callback=self.log_signal.emit,
+            )
+        except Exception as e:
+            self.log_signal.emit(str(e))
+            ok = False
+        self.finished_signal.emit(ok, model.label)
+
+
+class LocalUpscaleWorker(QThread):
+    """Local upscale launch from the OPTIONS › Upscale page
+    (paths entered in the panel, outside the pipeline chain)."""
+
+    log_signal = Signal(str)
+    finished_signal = Signal(bool, str)
+
+    def __init__(self, input_path: str, output_dir: str, params: dict):
+        super().__init__()
+        self.input_path = input_path
+        self.output_dir = output_dir
+        self.params     = params
+        self.stopped_by_user = False
+
+    def stop(self):
+        """Clean cancellation: run_upscayl terminates the upscayl-bin
+        subprocess as soon as ``cancel_check`` (isInterruptionRequested) turns true."""
+        self.stopped_by_user = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            ok, message = run_upscale_job(
+                self.input_path, self.output_dir, self.params,
+                log_callback=self.log_signal.emit,
+                cancel_check=self.isInterruptionRequested,
+            )
+            self.finished_signal.emit(ok, message)
+        except Exception as e:
+            self.finished_signal.emit(False, str(e))
+
+
+class UpscaleImagesWorker(QThread):
+    """``upscale`` chain step: enlarges the project's source images into
+    ``output_dir``, which Reconstruction will then consume instead of the
+    original folder (cf. ``StudioWindow._build_colmap_worker``).
+
+    The user's source folder is never modified: same precautionary principle
+    as ``ColmapEngine._run_upscale``, which moves the originals into
+    ``images_src`` rather than overwriting them. Exposes ``finished_signal``
+    (not ``finished``, which would shadow ``QThread.finished``) to be drivable by
+    ``_start_pipeline_worker``, like the other step workers.
+    """
+
+    log_signal = Signal(str)
+    finished_signal = Signal(bool, str)
+
+    def __init__(self, images_dir: str, output_dir: str, params: dict):
+        super().__init__()
+        self.images_dir = images_dir
+        self.output_dir = output_dir
+        self.params = params
+        self.stopped_by_user = False
+
+    def stop(self):
+        self.stopped_by_user = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            # Same path safeguard as all engines (BaseEngine.validate_path):
+            # this step writes an entire folder, it's no exception.
+            engine = UpscaleEngine(logger_callback=self.log_signal.emit)
+            safe_in = engine.validate_path(self.images_dir)
+            if safe_in is None or not safe_in.is_dir():
+                self.finished_signal.emit(False, f"Dossier d'images invalide : {self.images_dir}")
+                return
+            out = Path(self.output_dir)
+            safe_out = engine.validate_path(str(out.parent))
+            if safe_out is None:
+                self.finished_signal.emit(False, f"Destination invalide : {self.output_dir}")
+                return
+            dest = safe_out / out.name
+            dest.mkdir(parents=True, exist_ok=True)
+
+            ok, message = run_upscale_job(
+                str(safe_in), str(dest), self.params,
+                log_callback=self.log_signal.emit,
+                cancel_check=self.isInterruptionRequested,
+            )
+            self.finished_signal.emit(ok, message)
+        except Exception as e:
+            self.finished_signal.emit(False, str(e))

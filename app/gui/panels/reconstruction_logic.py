@@ -10,6 +10,7 @@ handled by the same field (spec §3 Reconstruction):
 from pathlib import Path
 from typing import Literal
 
+from app.core.i18n import tr
 from app.core.media import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from app.core.params import blur_factor_from_strength
 
@@ -149,17 +150,19 @@ def describe_unusable_source(path, convert_format="png") -> str:
     what the conversion setting is currently doing.
     """
     if not path or not str(path).strip():
-        return "Aucun chemin source n'est renseigné."
+        return tr("err_src_blank", "Aucun chemin source n'est renseigné.")
 
     p = Path(str(path).strip())
     if not p.exists():
-        return f"Chemin introuvable : {p}"
+        return tr("err_src_not_found", "Chemin introuvable : {path}").format(path=p)
 
     accepted = ", ".join(sorted(e.lstrip(".") for e in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS))
 
     if p.is_file():
-        found = p.suffix.lower().lstrip(".") or "sans extension"
-        detail = f"Le fichier « {p.name} » est au format {found}, non pris en charge."
+        found = p.suffix.lower().lstrip(".") or tr("err_src_no_extension", "sans extension")
+        detail = tr("err_src_file_unsupported",
+                    "Le fichier « {name} » est au format {found}, non pris en charge."
+                    ).format(name=p.name, found=found)
     else:
         try:
             suffixes = sorted({f.suffix.lower().lstrip(".") for f in p.iterdir()
@@ -169,23 +172,29 @@ def describe_unusable_source(path, convert_format="png") -> str:
             # only builds an error message, so it must not raise one itself.
             suffixes = []
         if not suffixes:
-            detail = f"Le dossier « {p.name} » ne contient aucun fichier exploitable."
+            detail = tr("err_src_folder_empty",
+                        "Le dossier « {name} » ne contient aucun fichier exploitable."
+                        ).format(name=p.name)
         else:
-            detail = (f"Le dossier « {p.name} » ne contient aucune image ni vidéo reconnue "
-                      f"(formats trouvés : {', '.join(suffixes)}).")
+            detail = tr("err_src_folder_unrecognized",
+                        "Le dossier « {name} » ne contient aucune image ni vidéo reconnue "
+                        "(formats trouvés : {found})."
+                        ).format(name=p.name, found=", ".join(suffixes))
 
-    message = f"{detail}\n\nFormats acceptés : {accepted}."
+    message = detail + "\n\n" + tr("err_src_accepted", "Formats acceptés : {accepted}.").format(accepted=accepted)
 
     if convert_format == "off":
-        message += (
-            "\n\n⚠️ La conversion est désactivée (réglage « convert » = off). "
+        message += "\n\n" + tr(
+            "err_src_convert_off",
+            "⚠️ La conversion est désactivée (réglage « convert » = off). "
             "Les formats autres que JPEG et PNG ne sont alors pas convertis et "
-            "seront refusés par la suite de la chaîne."
+            "seront refusés par la suite de la chaîne.",
         )
     else:
-        message += (
-            f"\n\nLes formats hors JPEG/PNG sont convertis automatiquement en "
-            f"{convert_format.upper()} à l'ingestion (réglage « convert » — "
-            f"CLI : --convert png|jpeg|off). Les originaux ne sont pas modifiés."
-        )
+        message += "\n\n" + tr(
+            "err_src_convert_on",
+            "Les formats hors JPEG/PNG sont convertis automatiquement en "
+            "{fmt} à l'ingestion (réglage « convert » — "
+            "CLI : --convert png|jpeg|off). Les originaux ne sont pas modifiés.",
+        ).format(fmt=convert_format.upper())
     return message

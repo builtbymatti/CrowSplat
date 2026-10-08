@@ -492,7 +492,6 @@ def check_dependencies():
     # Brush only surfaced once the training had been launched.
     for binary, feature in (
         ('brush', 'entraînement'),
-        ('glomap', 'mapper Glomap'),
         ('upscayl-bin', 'upscale'),
         ('npx', 'visualisation SuperSplat'),
     ):

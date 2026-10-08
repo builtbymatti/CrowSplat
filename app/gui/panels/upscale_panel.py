@@ -183,7 +183,7 @@ class UpscalePanel:
         One download at a time: ``_dl_worker`` is the shared guard, so a card
         click and a dropdown change cannot start two transfers at once.
         """
-        from app.gui.widgets.upscale_widgets import ModelDownloadWorker
+        from app.gui.workers import ModelDownloadWorker
         from app.upscayl_models import get_model
 
         if self._dl_worker is not None:
@@ -340,7 +340,7 @@ class UpscalePanel:
         if model is None:
             return
 
-        from app.gui.widgets.upscale_widgets import ModelDownloadWorker
+        from app.gui.workers import ModelDownloadWorker
 
         self.lbl_status.setText(tr("up_model_downloading").format(model.label))
         self.combo_model.setEnabled(False)

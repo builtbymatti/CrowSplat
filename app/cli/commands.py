@@ -8,6 +8,7 @@ from pathlib import Path as _Path
 from urllib.parse import quote
 
 from app.core.brush_engine import BrushEngine
+from app.core.brush_presets import BRUSH_DEFAULTS, BRUSH_PRESETS
 from app.core.brush_refine import (
     RefineEnvironmentError,
     detect_refine_start_iteration,
@@ -24,44 +25,6 @@ from app.core.system import get_brush_build_mode
 # Pure logic despite living under app/gui: no Qt import, so the CLI can share
 # the exact checkpoint semantics the interface uses instead of a second copy.
 from app.gui.chaining_logic import find_checkpoint_plys, is_checkpoint_ply, resolve_checkpoints_dir
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Brush defaults and presets
-# ─────────────────────────────────────────────────────────────────────────────
-
-BRUSH_DEFAULTS = {
-    "total_steps": 30000,
-    "sh_degree": 3,
-    "start_iter": 0,
-    "refine_every": 200,
-    "growth_grad_threshold": 0.003,
-    "growth_select_fraction": 0.2,
-    "growth_stop_iter": 15000,
-    "max_splats": 10_000_000,
-    "checkpoint_interval": 7000,
-    "max_resolution": 0,
-    "with_viewer": False,
-    "refine_mode": False,
-}
-
-BRUSH_PRESETS = {
-    "fast": {
-        "total_steps": 7000, "refine_every": 100,
-        "growth_grad_threshold": 0.01, "growth_select_fraction": 0.2,
-        "growth_stop_iter": 6000,
-    },
-    "std": {
-        "total_steps": 30000, "refine_every": 200,
-        "growth_grad_threshold": 0.003, "growth_select_fraction": 0.2,
-        "growth_stop_iter": 15000,
-    },
-    "dense": {
-        "total_steps": 50000, "refine_every": 100,
-        "growth_grad_threshold": 0.0005, "growth_select_fraction": 0.6,
-        "growth_stop_iter": 40000,
-    },
-}
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Run functions
@@ -254,41 +217,49 @@ def _apply_refine_mode(dataset_root, output_path, params, log=print):
     return str(refine_dir), str(refine_output)
 
 
-def run_brush(args):
+def _build_brush_params(args) -> dict:
+    """Assemble Brush params from defaults, preset and explicit CLI overrides.
+
+    Shared by ``run_brush`` and ``run_pipeline``. Options only one sub-command
+    defines are read with ``getattr`` and ignored when absent or ``None``.
+    """
     params = dict(BRUSH_DEFAULTS)
 
     if args.preset != "default":
         params.update(BRUSH_PRESETS[args.preset])
 
     # Explicit args override preset (only when provided by user)
-    if args.iterations is not None:
-        params["total_steps"] = args.iterations
-    if args.sh_degree is not None:
-        params["sh_degree"] = args.sh_degree
-    if args.start_iter is not None:
-        params["start_iter"] = args.start_iter
-    if args.refine_every is not None:
-        params["refine_every"] = args.refine_every
-    if args.growth_grad_threshold is not None:
-        params["growth_grad_threshold"] = args.growth_grad_threshold
-    if args.growth_select_fraction is not None:
-        params["growth_select_fraction"] = args.growth_select_fraction
-    if args.growth_stop_iter is not None:
-        params["growth_stop_iter"] = args.growth_stop_iter
-    if args.max_splats is not None:
-        params["max_splats"] = args.max_splats
-    if args.checkpoint_interval is not None:
-        params["checkpoint_interval"] = args.checkpoint_interval
-    if args.max_resolution is not None:
-        params["max_resolution"] = args.max_resolution
+    overrides = {
+        "total_steps": "iterations",
+        "sh_degree": "sh_degree",
+        "start_iter": "start_iter",
+        "refine_every": "refine_every",
+        "growth_grad_threshold": "growth_grad_threshold",
+        "growth_select_fraction": "growth_select_fraction",
+        "growth_stop_iter": "growth_stop_iter",
+        "max_splats": "max_splats",
+        "checkpoint_interval": "checkpoint_interval",
+        "max_resolution": "max_resolution",
+    }
+    for key, arg_name in overrides.items():
+        value = getattr(args, arg_name, None)
+        if value is not None:
+            params[key] = value
 
     params["device"] = args.device
-    params["refine_mode"] = args.refine_mode
     params["with_viewer"] = args.with_viewer
-    if args.custom_args:
-        params["custom_args"] = args.custom_args
+    # `pipeline` has no --refine_mode flag of its own today (only `brush`
+    # does), so fall back to False when the argument is missing.
+    params["refine_mode"] = getattr(args, "refine_mode", False)
     if args.ply_name:
         params["ply_name"] = args.ply_name
+    return params
+
+
+def run_brush(args):
+    params = _build_brush_params(args)
+    if args.custom_args:
+        params["custom_args"] = args.custom_args
 
     print(tr("cli_start_brush"))
     print(tr("cli_input", args.input))
@@ -332,53 +303,18 @@ def _apply_sharp_upscale(args) -> str:
     if not getattr(args, "upscale", False):
         return args.input
 
-    from app.upscayl_manager import find_binary, get_models_dir, run_upscayl
-    from app.upscayl_models import get_downloaded_models
-
-    if not find_binary():
-        print(tr("err_upscale_missing", "Error: Upscale requested but upscayl-bin not found."))
-        return args.input
-
-    input_path = _Path(args.input)
-    if not input_path.is_file():
-        print(tr("err_upscale_folder", "Folder upscale not supported in Sharp mode."))
-        return args.input
-
-    model_id = args.upscale_model or ""
-    if not model_id:
-        downloaded = get_downloaded_models(get_models_dir())
-        model_id = downloaded[0].id if downloaded else ""
-    if not model_id:
-        print("⚠ Upscale activé mais aucun modèle disponible — ignoré.")
-        return args.input
-
-    temp_dir = _Path(args.output) / "temp_upscale"
-    tmp_in = temp_dir / "_in"
-    tmp_in.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(input_path, tmp_in / input_path.name)
+    from app.core.sharp_upscale import preupscale_image
 
     upscale_params = {
-        "model_id": model_id,
+        "model_id": args.upscale_model or "",
         "scale": args.upscale_scale,
         "format": args.upscale_format,
         "tile": args.upscale_tile,
         "tta": args.upscale_tta,
         "compression": args.upscale_compression,
     }
-    print(tr("status_upscaling", "--- Upscale Image ---"))
-    result = {"ok": False}
-    run_upscayl(
-        str(tmp_in), str(temp_dir), upscale_params,
-        log_callback=print,
-        done_callback=lambda ok: result.__setitem__("ok", ok),
-    )
-    upscaled_path = temp_dir / (input_path.stem + "." + args.upscale_format)
-    if result["ok"] and upscaled_path.exists():
-        print(tr("status_upscale_done", "Upscale done. Launching Sharp..."))
-        return str(upscaled_path)
-
-    print(tr("err_upscale_failed", "Upscale failed. Using original image."))
-    return args.input
+    upscaled = preupscale_image(args.input, args.output, upscale_params, print)
+    return str(upscaled) if upscaled else args.input
 
 
 def run_sharp(args):
@@ -824,25 +760,7 @@ def run_pipeline(args):
     # ── Step 2: Brush ─────────────────────────────────────────────────────────
     _sep(f"Étape 2/{total_steps} — Entraînement Brush")
 
-    brush_params = dict(BRUSH_DEFAULTS)
-
-    if args.preset != "default":
-        brush_params.update(BRUSH_PRESETS[args.preset])
-
-    if args.iterations is not None:
-        brush_params["total_steps"] = args.iterations
-    if args.sh_degree is not None:
-        brush_params["sh_degree"] = args.sh_degree
-    if args.max_resolution is not None:
-        brush_params["max_resolution"] = args.max_resolution
-    brush_params["device"] = args.device
-    brush_params["with_viewer"] = args.with_viewer
-    # `pipeline` has no --refine_mode flag of its own today (only `brush`
-    # does), but the wiring stays generic — same fallback the GUI/CLI share
-    # elsewhere for optional args — so it activates as soon as one is added.
-    brush_params["refine_mode"] = getattr(args, "refine_mode", False)
-    if args.ply_name:
-        brush_params["ply_name"] = args.ply_name
+    brush_params = _build_brush_params(args)
 
     # Same checkpoint layout as the GUI. The CLI used to pass dataset_path as
     # its own output, so a project started here and reopened in the interface

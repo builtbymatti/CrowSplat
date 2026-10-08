@@ -35,10 +35,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.cli.commands import BRUSH_PRESETS
 from app.core.brush_engine import BrushEngine
 from app.core.brush_params import BrushParams
 from app.core.brush_presets import (
+    BRUSH_PRESETS,
     delete_user_preset,
     is_deletable,
     merge_presets,

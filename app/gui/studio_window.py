@@ -80,7 +80,6 @@ from app.gui.rail import TOOL_KEYS, Rail, item_label
 from app.gui.settings_window import ResetDialog, SettingsWindow
 from app.gui.studio_nav import PageRegistry
 from app.gui.styles import set_dark_theme
-from app.gui.widgets.upscale_widgets import TestWorker, UpscaleImagesWorker
 from app.gui.workers import (
     BrushWorker,
     CleanerWorker,
@@ -88,9 +87,11 @@ from app.gui.workers import (
     ExportWorker,
     Extractor360Worker,
     FourDGSWorker,
+    LocalUpscaleWorker,
     SharpVideoWorker,
     SharpWorker,
     SplatTransformWorker,
+    UpscaleImagesWorker,
 )
 
 # Stacked page order (PIPELINE steps, then OUTILS modules).
@@ -464,21 +465,24 @@ class StudioWindow(QMainWindow):
         recon_panel.center.setEnabled(is_gsplat)
         recon_tooltip = (
             "" if is_gsplat else
-            "Réglages ignorés hors mode Gsplat — la Reconstruction utilise "
-            "Sharp ou la préparation de dataset 4DGS à la place de COLMAP."
+            tr("tip_recon_ignored_non_gsplat",
+               "Réglages ignorés hors mode Gsplat — la Reconstruction utilise "
+               "Sharp ou la préparation de dataset 4DGS à la place de COLMAP.")
         )
         recon_panel.center.setToolTip(recon_tooltip)
 
         source = self.panels["source"]
         is_4dgs = mode == "4dgs"
-        no_effect_tooltip = (
+        no_effect_tooltip = tr(
+            "tip_no_effect_4dgs",
             "Sans effet en mode 4DGS : la chaîne s'arrête après la "
-            "Reconstruction (pas d'entraîneur Apple Silicon)."
+            "Reconstruction (pas d'entraîneur Apple Silicon).",
         )
         source.chk_entrainement.setEnabled(is_gsplat)
         source.chk_entrainement.setToolTip(
             "" if is_gsplat else
-            "Sans effet hors mode Gsplat : seul ce mode entraîne avec Brush."
+            tr("tip_no_effect_non_gsplat",
+               "Sans effet hors mode Gsplat : seul ce mode entraîne avec Brush.")
         )
         for checkbox in (source.chk_nettoyer, source.chk_exporter, source.chk_visualiser):
             checkbox.setEnabled(not is_4dgs)
@@ -630,9 +634,12 @@ class StudioWindow(QMainWindow):
             if actual_kind not in (forced_type, "mixed"):
                 self._fail_pipeline_step(
                     step,
-                    f"Type de source forcé sur « {forced_type} » mais le contenu "
-                    f"détecté est « {actual_kind} » — vérifiez le champ Source ou "
-                    "le sélecteur de type.",
+                    tr(
+                        "err_source_type_mismatch",
+                        "Type de source forcé sur « {forced} » mais le contenu "
+                        "détecté est « {actual} » — vérifiez le champ Source ou "
+                        "le sélecteur de type.",
+                    ).format(forced=forced_type, actual=actual_kind),
                 )
                 return None
             return forced_type
@@ -786,9 +793,12 @@ class StudioWindow(QMainWindow):
             if input_type == "video":
                 self._fail_pipeline_step(
                     "reconstruction",
-                    "Le mode Sharp de la chaîne attend un dossier d'images — "
-                    "utilisez le module Sharp (OUTILS) pour traiter une vidéo "
-                    "directement.",
+                    tr(
+                        "err_sharp_video_rejected",
+                        "Le mode Sharp de la chaîne attend un dossier d'images — "
+                        "utilisez le module Sharp (OUTILS) pour traiter une vidéo "
+                        "directement.",
+                    ),
                 )
                 return None
         project_name = source_state["project_name"].strip() or "Untitled"
@@ -865,9 +875,12 @@ class StudioWindow(QMainWindow):
             return str(resume_dir), "images", output_path, project_name, False
         self._fail_pipeline_step(
             "reconstruction",
-            "Chemin de reprise COLMAP invalide — attendu un projet CorbeauSplat "
-            "existant (images/, database.db ou sparse/) ou un dossier contenant "
-            "directement des images.",
+            tr(
+                "err_colmap_resume_invalid",
+                "Chemin de reprise COLMAP invalide — attendu un projet CorbeauSplat "
+                "existant (images/, database.db ou sparse/) ou un dossier contenant "
+                "directement des images.",
+            ),
         )
         return False
 
@@ -1028,13 +1041,14 @@ class StudioWindow(QMainWindow):
         elif self.current_pipeline_mode == "sharp":
             producer = "Sharp"
         elif self.current_pipeline_mode == "gsplat" and self.run_state.entrainement_apres:
-            producer = "Entraînement (Brush)"
+            producer = tr("producer_training_brush", "Entraînement (Brush)")
         else:
             return tr("err_no_paths", "Chemins manquants.")
-        return (
-            f"Aucun fichier .ply trouvé — l'étape « {producer} » n'a pas encore "
-            "produit de résultat (ou n'est pas dans la chaîne actuelle)."
-        )
+        return tr(
+            "err_no_ply_from_producer",
+            "Aucun fichier .ply trouvé — l'étape « {producer} » n'a pas encore "
+            "produit de résultat (ou n'est pas dans la chaîne actuelle).",
+        ).format(producer=producer)
 
     def _resolve_ply_output(self):
         """Most relevant PLY path to hand to the next step: the Nettoyage
@@ -1539,8 +1553,8 @@ class StudioWindow(QMainWindow):
         output_path = panel.output_path.text().strip()
         if not self._check_paths(input_path, output_path):
             return
-        worker = TestWorker(input_path, output_path, panel.get_params())
-        self._start_tool_worker(worker, finished_signal=worker.finished)
+        worker = LocalUpscaleWorker(input_path, output_path, panel.get_params())
+        self._start_tool_worker(worker, finished_signal=worker.finished_signal)
 
     def _launch_brush(self):
         """OUTILS "Brush" module (manual/standalone mode of the Training panel,
@@ -1751,7 +1765,8 @@ class StudioWindow(QMainWindow):
             # be destroyed. Ask again, then force it before the window is
             # allowed to close under it.
             self.logs_window.append_log(
-                "Un traitement ne s'est pas arrêté après 5 s — arrêt forcé avant fermeture."
+                tr("log_forced_stop_on_close",
+                   "Un traitement ne s'est pas arrêté après 5 s — arrêt forcé avant fermeture.")
             )
             worker.requestInterruption()
             worker.terminate()

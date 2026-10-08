@@ -8,6 +8,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.cli import main
+from app.core.logging_setup import configure_logging
 
 if __name__ == "__main__":
+    configure_logging()
     main()

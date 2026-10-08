@@ -35,7 +35,11 @@ from app.gui.widgets.cancel_button import CancelButton
 from app.gui.widgets.dialog_utils import get_existing_directory, get_open_file_name
 from app.gui.widgets.drop_line_edit import DropLineEdit
 
-_STRENGTHS = (("light", "Léger"), ("medium", "Moyen"), ("strong", "Fort"))
+_STRENGTHS = (
+    ("light", "strength_light", "Léger"),
+    ("medium", "strength_medium", "Moyen"),
+    ("strong", "strength_strong", "Fort"),
+)
 
 
 class CleanerPanel:
@@ -98,8 +102,8 @@ class CleanerPanel:
         form = QFormLayout()
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)  # avoid horizontal overflow (long labels)
         self.combo_strength = QComboBox()
-        for value, _label in _STRENGTHS:
-            self.combo_strength.addItem(value, value)
+        for value, key, default in _STRENGTHS:
+            self.combo_strength.addItem(tr(key, default), value)
         self.combo_strength.setCurrentIndex(1)  # medium
         self.lbl_strength = QLabel()
         form.addRow(self.lbl_strength, self.combo_strength)
@@ -239,6 +243,8 @@ class CleanerPanel:
             self.output_path.setText(path)
 
     def retranslate_ui(self):
+        for i, (_value, key, default) in enumerate(_STRENGTHS):
+            self.combo_strength.setItemText(i, tr(key, default))
         self.lbl_mode.setText(tr("cleaner_mode", "Mode"))
         self.combo_mode.setItemText(0, tr("cleaner_mode_single", "Fichier unique"))
         self.combo_mode.setItemText(1, tr("cleaner_mode_batch", "Dossier (batch)"))

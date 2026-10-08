@@ -835,22 +835,20 @@ class ColmapEngine(BaseEngine):
                     if len(parts) > 1:
                         self.status(f"{status_prefix} : image {parts[1].strip()}")
 
-        try:
-            # Large scenes: matching/mapper can exceed 1h — aligned on Brush (4h).
-            returncode = self._execute_command(cmd, env=env, line_callback=_colmap_parser, timeout=14400)
-            if self.is_cancelled():
-                return False
-
-            if returncode == 0:
-                self.log(f"{description} termine")
-                return True
-            else:
-                self.log(f"{description} echoue")
-                return False
-
-        except FileNotFoundError:
+        if shutil.which(str(cmd[0])) is None and not Path(str(cmd[0])).is_file():
             self.log("COLMAP non trouve. Installez avec: brew install colmap")
             return False
+
+        # Large scenes: matching/mapper can exceed 1h — aligned on Brush (4h).
+        returncode = self._execute_command(cmd, env=env, line_callback=_colmap_parser, timeout=14400)
+        if self.is_cancelled():
+            return False
+
+        if returncode == 0:
+            self.log(f"{description} termine")
+            return True
+        self.log(f"{description} echoue")
+        return False
 
     def feature_extraction(self, database_path: str, images_dir: str) -> bool:
         """Run feature extraction (SIFT or ALIKED)."""

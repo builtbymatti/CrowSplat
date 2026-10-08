@@ -11,7 +11,6 @@ from typing import Any
 
 from .system import get_device, resolve_project_root
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 class IProcessRunner:
     """Abstract interface for running a system process (DIP & testability)"""

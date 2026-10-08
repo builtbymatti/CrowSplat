@@ -1,10 +1,10 @@
-import json
 import logging
 from string import Template
 
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
+from app.core.atomic_io import read_json_dict, update_json_file
 from app.core.system import resolve_project_root
 
 logger = logging.getLogger(__name__)
@@ -120,15 +120,9 @@ _STYLESHEET = Template("""
 
 def get_saved_theme():
     """Read the theme saved in config.json (default: slate)."""
-    try:
-        config_file = resolve_project_root() / "config.json"
-        if config_file.exists():
-            with open(config_file) as f:
-                name = json.load(f).get("theme", DEFAULT_THEME)
-                if name in THEMES:
-                    return name
-    except (OSError, json.JSONDecodeError) as e:
-        logger.debug("Could not read saved theme, using default: %s", e)
+    name = read_json_dict(resolve_project_root() / "config.json").get("theme", DEFAULT_THEME)
+    if isinstance(name, str) and name in THEMES:
+        return name
     return DEFAULT_THEME
 
 
@@ -137,17 +131,8 @@ def save_theme(name):
     if name not in THEMES:
         return
     try:
-        config_file = resolve_project_root() / "config.json"
-        config = {}
-        if config_file.exists():
-            with open(config_file) as f:
-                existing = json.load(f)
-                if isinstance(existing, dict):
-                    config = existing
-        config["theme"] = name
-        with open(config_file, "w") as f:
-            json.dump(config, f, indent=2)
-    except (OSError, json.JSONDecodeError) as e:
+        update_json_file(resolve_project_root() / "config.json", theme=name)
+    except OSError as e:
         # The theme still applies for this session; only persistence failed.
         logger.warning("Could not save theme to config.json: %s", e)
 

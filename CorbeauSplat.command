@@ -95,7 +95,9 @@ if [ -z "$BREW_BIN" ]; then
 	echo
 	if [[ $REPLY =~ ^[YyOo]$ ]]; then
 		say ">>> Downloading installer..."
-		BREW_INSTALL_SCRIPT="/tmp/homebrew-install.sh"
+		# mktemp: a fixed /tmp path could be pre-created by another local user and
+		# swapped between the SHA256 check and execution.
+		BREW_INSTALL_SCRIPT="$(mktemp -t homebrew-install)"
 		# Pinned to known version + SHA256 to prevent MITM
 		BREW_TAG="4.4.23"
 		BREW_SHA256="c63e04915a08f4ded2f5f710fb6b83d8070245e5e30bdffb5d6b462fd1c9089e"
@@ -229,7 +231,9 @@ if ! "$PYTHON_CMD" -c "import json, os, sys" > /dev/null 2>&1 || [ "$PY_MINOR" -
 		echo "⚠️  Python environment is unstable. Rebuilding (${_REBUILD_COUNT}/2)..."
 	fi
 	rm -rf "$VENV_DIR"
-	_REBUILD_COUNT="$_REBUILD_COUNT" "$0" "${FILTERED_ARGS[@]}"
+	# ${arr[@]+...} form: macOS /bin/bash 3.2 treats an empty array as unbound
+	# under `set -u`, which aborted the re-exec on a plain double-click launch.
+	_REBUILD_COUNT="$_REBUILD_COUNT" "$0" ${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}
 	exit $?
 fi
 

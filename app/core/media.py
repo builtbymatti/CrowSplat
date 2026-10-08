@@ -266,7 +266,7 @@ def format_timecode(seconds: float) -> str:
 # Recognised, in order: "H:MM:SS.s", "MM:SS.s", "SS.s". A bare number is read
 # as seconds, so "90" and "1:30" both mean the same instant.
 _TIMECODE_RE = re.compile(
-    r"^\s*(?:(?:(?P<h>\d+):)?(?P<m>\d{1,2}):)?(?P<s>\d{1,2}(?:[.,]\d+)?)\s*$"
+    r"^\s*(?:(?:(?P<h>\d+):)?(?P<m>\d{1,2}):)?(?P<s>\d+(?:[.,]\d+)?)\s*$"
 )
 
 

@@ -1,6 +1,6 @@
-"""OUTILS module 360 Extractor (equirectangular → planar images).
+"""TOOLS module 360 Extractor (equirectangular → planar images).
 
-Image output → no Nettoyer/Exporter/Visualiser chaining.
+Image output → no Clean/Export/View chaining.
 """
 
 from PySide6.QtCore import Qt
@@ -73,7 +73,7 @@ class Extractor360Panel:
 
         # ── Moved out of _build_right: sampling, layout, quality, AI ──
         form = QFormLayout()
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)  # \u00e9vite d\u00e9bordement horizontal (libell\u00e9s longs)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)  # avoid horizontal overflow (long labels)
         self.spin_interval = QDoubleSpinBox()
         self.spin_interval.setRange(0.1, 60.0)
         self.spin_interval.setSingleStep(0.1)
@@ -117,7 +117,7 @@ class Extractor360Panel:
         self.ai_group.setCheckable(True)
         self.ai_group.setChecked(False)
         ag = QFormLayout(self.ai_group)
-        ag.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)  # \u00e9vite d\u00e9bordement horizontal (libell\u00e9s longs)
+        ag.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)  # avoid horizontal overflow (long labels)
         self.chk_mask_operator = QCheckBox()
         ag.addRow(self.chk_mask_operator)
         self.chk_skip_operator = QCheckBox()

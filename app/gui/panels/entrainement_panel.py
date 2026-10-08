@@ -473,7 +473,11 @@ class EntrainementPanel:
         )
         if confirm != QMessageBox.StandardButton.Yes:
             return
-        delete_user_preset(name)
+        try:
+            delete_user_preset(name)
+        except OSError as e:
+            QMessageBox.warning(self.center, tr("brush_delete_preset", "Supprimer le preset"), str(e))
+            return
         self._reload_presets()
         self.combo_preset.setCurrentIndex(0)
 
@@ -496,7 +500,14 @@ class EntrainementPanel:
         if ok and name.strip():
             data = self.get_params().to_dict()
             data["ply_name"] = self.ply_name_edit.text().strip()
-            save_user_preset(name.strip(), data)
+            try:
+                save_user_preset(name.strip(), data)
+            except (ValueError, OSError) as e:
+                # ValueError: name rejected by is_safe_config_name ("/", "..").
+                # Without this the exception escaped the Qt slot and the preset
+                # was silently not saved.
+                QMessageBox.warning(self.center, tr("brush_save_preset", "Enregistrer le preset"), str(e))
+                return
             self._reload_presets()
 
     # ── Handlers ────────────────────────────────────────────────────────────────

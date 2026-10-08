@@ -56,15 +56,13 @@ def detect_source_kind(path) -> Literal["images", "video", "mixed", "empty"]:
     """Classify a Source path as ``"images"``/``"video"``/``"mixed"``/``"empty"``.
 
     Pure function, no Qt dependency — used by ``SourcePanel`` for the live FPS
-    field / mixed-content banner, and meant to replace ``studio_window.
-    _detect_input_type`` (authoritative check at launch time) in a later pass.
-    Unlike that older helper, this one distinguishes ``"mixed"`` (both images
-    and videos found in the same folder) from a clean ``"images"``/``"video"``
-    match.
+    field / mixed-content banner and by ``StudioWindow`` at launch time. It
+    distinguishes ``"mixed"`` (both images and videos found in the same
+    folder) from a clean ``"images"``/``"video"`` match.
 
     A single file is classified directly from its extension. A directory is
-    scanned one level deep (no recursion, matching ``_detect_input_type``'s
-    behaviour) and classified from the extensions found inside. Never raises:
+    scanned one level deep (no recursion) and classified from the extensions
+    found inside. Never raises:
     a missing/unreadable path or an unsupported extension resolves to
     ``"empty"``.
     """
@@ -163,8 +161,13 @@ def describe_unusable_source(path, convert_format="png") -> str:
         found = p.suffix.lower().lstrip(".") or "sans extension"
         detail = f"Le fichier « {p.name} » est au format {found}, non pris en charge."
     else:
-        suffixes = sorted({f.suffix.lower().lstrip(".") for f in p.iterdir()
-                           if f.is_file() and f.suffix})
+        try:
+            suffixes = sorted({f.suffix.lower().lstrip(".") for f in p.iterdir()
+                               if f.is_file() and f.suffix})
+        except OSError:
+            # Unreadable folder (permissions, unmounted volume): this helper
+            # only builds an error message, so it must not raise one itself.
+            suffixes = []
         if not suffixes:
             detail = f"Le dossier « {p.name} » ne contient aucun fichier exploitable."
         else:

@@ -78,9 +78,9 @@ class UpscalePanel:
         layout.addLayout(out_row)
 
         # ── Moved out of _build_right: model, scale, format, tiles, TTA,
-        # compression (same "everything in the centre" convention as the other Paramètres steps) ──
+        # compression (same "everything in the centre" convention as the other settings steps) ──
         form = QFormLayout()
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)  # \u00e9vite d\u00e9bordement horizontal (libell\u00e9s longs)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)  # avoid horizontal overflow (long labels)
 
         self.combo_model = QComboBox()
         # `activated`, not `currentIndexChanged`: it fires only when the user
@@ -217,14 +217,22 @@ class UpscalePanel:
         reply = QMessageBox.question(
             self.center,
             tr("up_delete_title", "Supprimer le modèle"),
-            tr("up_delete_body", "Supprimer « {} » du disque ?").format(label),
+            # No default passed to tr(): with the key present, LanguageManager.tr()
+            # feeds extra arguments to .format(), which used to inject the French
+            # default into {0} and garble the dialog text.
+            tr("up_delete_body").format(label),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
         models_dir = get_models_dir()
-        for ext in (".bin", ".param"):
-            (models_dir / f"{model_id}{ext}").unlink(missing_ok=True)
+        try:
+            for ext in (".bin", ".param"):
+                (models_dir / f"{model_id}{ext}").unlink(missing_ok=True)
+        except OSError as e:
+            # Read-only volume or permission change: report it instead of letting
+            # the exception escape the Qt slot with no feedback.
+            QMessageBox.warning(self.center, tr("up_delete_title", "Supprimer le modèle"), str(e))
         self.refresh_models()
 
     def _browse_input(self):

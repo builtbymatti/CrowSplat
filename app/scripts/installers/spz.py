@@ -92,8 +92,7 @@ class SpzEngineDep(EngineDependency):
         except subprocess.CalledProcessError as e:
             print(f"Warning: pip uninstall spz failed: {e}")
         if self.source_dir.exists():
-            import shutil as _shutil
-            _shutil.rmtree(str(self.source_dir), ignore_errors=True)
+            shutil.rmtree(str(self.source_dir), ignore_errors=True)
         if self.version_file.exists():
             self.version_file.unlink()
         print("spz uninstalled.")

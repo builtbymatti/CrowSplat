@@ -145,7 +145,7 @@ class SettingsWindow(QDialog):
         self.lbl_theme = QLabel(tr("theme_change", "Thème"))
         form.addRow(self.lbl_theme, self.combo_theme)
 
-        # Langue (fonctionnel)
+        # Language (functional)
         self.combo_lang = _NoScrollComboBox()
         self.combo_lang.setMinimumWidth(200)
         self.combo_lang.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
@@ -198,7 +198,7 @@ class SettingsWindow(QDialog):
 
         self.setWindowTitle(tr("settings_title", "Réglages généraux"))
 
-    # ── Slots fonctionnels ──────────────────────────────────────────────────────
+    # ── Functional slots ──────────────────────────────────────────────────────
     def _on_theme(self, index):
         name = self.combo_theme.itemData(index)
         if name:

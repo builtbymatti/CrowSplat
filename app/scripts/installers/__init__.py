@@ -17,7 +17,6 @@ from app.scripts.installers.tools import (
     check_xcode_tools,
     get_local_version,
     get_remote_version,
-    install_build_tools,
     install_node_js,
     install_rust_toolchain,
     install_system_dependencies,
@@ -51,7 +50,6 @@ __all__ = [
     "check_cmake_ninja",
     "check_xcode_tools",
     "install_node_js",
-    "install_build_tools",
     "install_rust_toolchain",
     "install_system_dependencies",
 ]

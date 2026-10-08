@@ -5,6 +5,7 @@ import shutil
 import sys
 import time
 from pathlib import Path as _Path
+from urllib.parse import quote
 
 from app.core.brush_engine import BrushEngine
 from app.core.brush_refine import (
@@ -473,7 +474,7 @@ def run_supersplat(args):
     url = f"http://localhost:{args.port}"
     url_params = []
     if filename:
-        data_url = f"http://localhost:{args.data_port}/{filename}"
+        data_url = f"http://localhost:{args.data_port}/{quote(filename)}"
         url_params.append(f"load={data_url}")
     if args.no_ui:
         url_params.append("noui")
@@ -676,6 +677,8 @@ def run_clean(args):
                 print(f"  ⚠️  {src.name} introuvable — ignoré")
 
         print(f"Export terminé : {success_count}/{len(export_sources)} réussis.")
+        if success_count < len(export_sources):
+            sys.exit(1)
 
 
 def run_splat_transform(args):

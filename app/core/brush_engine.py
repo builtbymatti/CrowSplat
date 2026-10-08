@@ -72,7 +72,6 @@ class BrushEngine(BaseEngine):
         """
         super().__init__("Brush", logger_callback, thermal_throttling=thermal_throttling)
         self.brush_bin = resolve_binary("brush")
-        self.process = None
 
     def build_command(self, input_path: str, output_path: str,
                       params: dict[str, Any] | None = None) -> tuple[list[str], dict[str, str]]:
@@ -185,7 +184,9 @@ class BrushEngine(BaseEngine):
 
         # --- Memory & thermal adaptation ---
         eps = params or {}
-        orig_splats = eps.get("max_splats", 10_000_000)
+        # `or`: the key may be present with None (hand-built dicts), which
+        # adapt_max_splats() cannot multiply.
+        orig_splats = eps.get("max_splats") or 10_000_000
         adapted = adapt_max_splats(orig_splats, thermal_throttling=self.thermal_throttling)
         if adapted < orig_splats:
             reduction_pct = 100 - int(100 * adapted / max(orig_splats, 1))
@@ -196,10 +197,9 @@ class BrushEngine(BaseEngine):
                 f"max_splats réduit de {reduction_pct}% "
                 f"({orig_splats:,} → {adapted:,})"
             )
-            if eps is params:
-                params["max_splats"] = adapted
-            else:
-                params = dict(eps, max_splats=adapted)
+            # A copy, never the caller's dict: mutating it made a reused params
+            # dict shrink max_splats again on every run.
+            params = dict(eps, max_splats=adapted)
 
         cmd, env = self.build_command(str(safe_input), str(safe_output), params)
         self.log(f"Lancement Brush: {' '.join(cmd)}")

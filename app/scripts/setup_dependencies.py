@@ -31,7 +31,6 @@ from app.scripts.installers.tools import (
     check_xcode_tools,
     get_local_version,
     get_remote_version,
-    install_build_tools,
     install_node_js,
     install_rust_toolchain,
     install_system_dependencies,
@@ -61,40 +60,17 @@ __all__ = [
     "check_xcode_tools",
     "get_local_version",
     "get_remote_version",
-    "install_build_tools",
     "install_extractor_360",
     "install_node_js",
     "install_rust_toolchain",
-    "install_sharp",
     "install_system_dependencies",
-    "install_upscale",
     "load_config",
     "relax_requirements",
     "save_local_version",
     "uninstall_extractor_360",
-    "uninstall_sharp",
-    "uninstall_upscale",
 ]
 
 # ── Compatibility wrappers (used by external modules) ──────────────────────
-
-def uninstall_sharp():
-    return SharpEngineDep().uninstall()
-
-def install_sharp(engines_dir=None, version_file=None):  # noqa: ARG001 - kept for call-site compatibility
-    # Compatibility wrapper: both arguments are accepted and ignored, the
-    # installer resolves those paths itself.
-    dep = SharpEngineDep()
-    dep.install()
-    return dep.is_installed()
-
-def uninstall_upscale():
-    return UpscaylEngineDep().uninstall()
-
-def install_upscale():
-    dep = UpscaylEngineDep()
-    dep.install()
-    return dep.is_installed()
 
 def uninstall_extractor_360():
     return Extractor360EngineDep().uninstall()
@@ -110,9 +86,6 @@ def get_venv_360_python():
     if sys.platform == "win32":
         return root / ".venv_360" / "Scripts" / "python.exe"
     return root / ".venv_360" / "bin" / "python"
-
-
-# resolve_project_root is imported from app.core.system
 
 
 # ── Main entry point ──────────────────────────────────────────────────────

@@ -57,7 +57,9 @@ class EngineDependency:
         if not self.repo_url:
             return ""
         try:
-            output = subprocess.check_output(["git", "ls-remote", self.repo_url, "HEAD"], text=True).strip()
+            output = subprocess.check_output(
+                ["git", "ls-remote", self.repo_url, "HEAD"], text=True, timeout=10
+            ).strip()
             return output.split()[0] if output else ""
         except Exception as e:
             print(f"Warning: Failed to get remote version for {self.repo_url}: {e}")
@@ -265,7 +267,11 @@ class DependencyManager:
                         print(f">>> Mise à jour de {name.capitalize()}...")
                         try:
                             engine.install()
-                            print(f"✅ {name.capitalize()} mis à jour.")
+                            # install() reports most failures by returning, not raising.
+                            if engine.is_installed():
+                                print(f"✅ {name.capitalize()} mis à jour.")
+                            else:
+                                print(f"❌ Échec de la mise à jour de {name}.")
                         except Exception as e:
                             print(f"❌ Échec de la mise à jour de {name}: {e}")
                     else:
@@ -274,7 +280,10 @@ class DependencyManager:
                      print(f">>> Auto-updating {name.capitalize()}...")
                      try:
                          engine.install()
-                         print(f"✅ {name.capitalize()} updated.")
+                         if engine.is_installed():
+                             print(f"✅ {name.capitalize()} updated.")
+                         else:
+                             print(f"❌ Auto-update failed for {name}.")
                      except Exception as e:
                          print(f"❌ Auto-update failed for {name}: {e}")
                 elif check_only:
@@ -292,4 +301,4 @@ class DependencyManager:
                     print(f"  ✅ {name.capitalize()}: Ready")
 
         if missing_engines_startup:
-            print("\nℹ️  Note: Automatically installed missing engines.")
+            print("\nℹ️  Note: some engines are still missing (see ❌ above).")

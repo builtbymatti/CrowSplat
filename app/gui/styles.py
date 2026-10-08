@@ -1,10 +1,13 @@
 import json
+import logging
 from string import Template
 
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 from app.core.system import resolve_project_root
+
+logger = logging.getLogger(__name__)
 
 # Available dark themes. Each theme is a coherent color set; the stylesheet
 # structure is shared (see _STYLESHEET).
@@ -124,8 +127,8 @@ def get_saved_theme():
                 name = json.load(f).get("theme", DEFAULT_THEME)
                 if name in THEMES:
                     return name
-    except (OSError, json.JSONDecodeError):
-        pass
+    except (OSError, json.JSONDecodeError) as e:
+        logger.debug("Could not read saved theme, using default: %s", e)
     return DEFAULT_THEME
 
 
@@ -144,8 +147,9 @@ def save_theme(name):
         config["theme"] = name
         with open(config_file, "w") as f:
             json.dump(config, f, indent=2)
-    except (OSError, json.JSONDecodeError):
-        pass
+    except (OSError, json.JSONDecodeError) as e:
+        # The theme still applies for this session; only persistence failed.
+        logger.warning("Could not save theme to config.json: %s", e)
 
 
 def set_dark_theme(app_instance=None, theme=None):

@@ -89,9 +89,13 @@ class SessionManager:
         config[self.CONFIG_KEY] = project_state
         if flags is not None:
             config[self.FLAGS_KEY] = flags
+        # Write-then-rename: config.json is shared with the language and theme
+        # settings, so a crash mid-write must not leave it truncated.
+        tmp_file = session_file.with_name(session_file.name + ".tmp")
         try:
-            with open(session_file, "w", encoding="utf-8") as f:
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=2)
+            os.replace(tmp_file, session_file)
         except OSError as e:
             logger.error("Erreur sauvegarde session: %s", e)
 
@@ -157,7 +161,7 @@ class AppLifecycle:
             QApplication.quit()
             sys.exit(0)
 
-        # Relance normale
+        # Normal relaunch
         args = [python, str(main_py)] + sys.argv[1:]
         logger.info("Relaunching via execv: %s", args)
 
@@ -183,7 +187,9 @@ class AppLifecycle:
         run_cmd = root_dir / "CorbeauSplat.command"
 
         # Collect deletion targets (relative names only)
-        targets_rel = [".venv", ".venv_sharp", ".venv_360"]
+        # Same four venvs as the CorbeauSplat.command reset: .venv_4dgs
+        # (nerfstudio, the heaviest) used to survive a reset from the GUI.
+        targets_rel = [".venv", ".venv_sharp", ".venv_360", ".venv_4dgs"]
 
         if deep:
             targets_rel.append("engines")
@@ -217,11 +223,10 @@ class AppLifecycle:
         if deep:
             for p in root_dir.glob("config.sync-conflict-*"):
                 try:
-                    p.relative_to(root_dir)
                     logger.warning("Reset: removing %s", p)
                     p.unlink()
-                except (ValueError, OSError):
-                    pass
+                except OSError as e:
+                    logger.warning("Reset: could not remove %s — %s", p, e)
 
         # Relaunch via CorbeauSplat.command
         if run_cmd.exists():

@@ -1,6 +1,7 @@
 import importlib.util
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -342,23 +343,20 @@ class ExportEngine(BaseEngine):
 
             pcd = o3d.io.read_point_cloud(str(input_file))
 
-            # open3d doesn't natively export GLB, convert via intermediate
-            temp_ply = output_file.parent / f"{input_file.stem}_temp.ply"
-            o3d.io.write_point_cloud(str(temp_ply), pcd)
-
-            # Then use trimesh for GLB
-            try:
-                import trimesh
+            # open3d doesn't natively export GLB, convert via an intermediate PLY.
+            # It lives in a private temp dir: a fixed "<stem>_temp.ply" next to
+            # the output could overwrite, then delete, a user file of that name.
+            with tempfile.TemporaryDirectory(prefix="corbeausplat_glb_") as tmp:
+                temp_ply = Path(tmp) / f"{input_file.stem}.ply"
+                o3d.io.write_point_cloud(str(temp_ply), pcd)
+                try:
+                    import trimesh
+                except ImportError:
+                    return False
                 scene = trimesh.load(str(temp_ply))
                 scene.export(str(output_file))
-                temp_ply.unlink(missing_ok=True)
-                self.log(f"Exporté GLB via open3d+trimesh: {output_file}")
-                return True
-            except ImportError:
-                pass
-
-            temp_ply.unlink(missing_ok=True)
-            return False
+            self.log(f"Exporté GLB via open3d+trimesh: {output_file}")
+            return True
         except ImportError:
             return False
         except Exception as e:
@@ -374,38 +372,37 @@ class ExportEngine(BaseEngine):
             ply = PlyData.read(str(input_file))
             vertex = ply['vertex']
 
-            temp_obj = input_file.parent / f"{input_file.stem}_temp.obj"
-            temp_mtl = input_file.parent / f"{input_file.stem}_temp.mtl"
+            # Private temp dir rather than "<stem>_temp.obj" beside the input:
+            # that fixed name could clobber a user file and was left behind
+            # whenever the write raised.
+            with tempfile.TemporaryDirectory(prefix="corbeausplat_glb_") as tmp:
+                temp_obj = Path(tmp) / f"{input_file.stem}.obj"
+                temp_mtl = Path(tmp) / f"{input_file.stem}.mtl"
 
-            with open(temp_obj, 'w') as f:
-                f.write("# Temp OBJ from PLY\n")
-                f.write(f"mtllib {temp_mtl.name}\n")
-                f.write("o PointCloud\n\n")
+                with open(temp_obj, 'w') as f:
+                    f.write("# Temp OBJ from PLY\n")
+                    f.write(f"mtllib {temp_mtl.name}\n")
+                    f.write("o PointCloud\n\n")
 
-                # Vectorised write: see _export_xyz for the reason.
-                cols = [vertex[axis].astype(np.float64) for axis in ('x', 'y', 'z')]
-                row_fmt = "v %s %s %s"
-                colors = _extract_colors(vertex)
-                if colors is not None:
-                    cols += [colors[:, i].astype(np.float64) / 255 for i in range(3)]
-                    row_fmt += " %.3f %.3f %.3f"
+                    # Vectorised write: see _export_xyz for the reason.
+                    cols = [vertex[axis].astype(np.float64) for axis in ('x', 'y', 'z')]
+                    row_fmt = "v %s %s %s"
+                    colors = _extract_colors(vertex)
+                    if colors is not None:
+                        cols += [colors[:, i].astype(np.float64) / 255 for i in range(3)]
+                        row_fmt += " %.3f %.3f %.3f"
 
-                np.savetxt(f, np.column_stack(cols), fmt=row_fmt)
-                f.write(f"\n# {len(vertex)} vertices\n")
+                    np.savetxt(f, np.column_stack(cols), fmt=row_fmt)
+                    f.write(f"\n# {len(vertex)} vertices\n")
 
-            with open(temp_mtl, 'w') as f:
-                f.write("newmtl point_material\n")
-                f.write("Kd 1.0 1.0 1.0\n")
+                with open(temp_mtl, 'w') as f:
+                    f.write("newmtl point_material\n")
+                    f.write("Kd 1.0 1.0 1.0\n")
 
-            if self._convert_obj_to_glb(temp_obj, output_file):
-                temp_obj.unlink(missing_ok=True)
-                temp_mtl.unlink(missing_ok=True)
-                self.log(f"Exporté GLB via assimp: {output_file}")
-                return True
-
-            temp_obj.unlink(missing_ok=True)
-            temp_mtl.unlink(missing_ok=True)
-            return False
+                if not self._convert_obj_to_glb(temp_obj, output_file):
+                    return False
+            self.log(f"Exporté GLB via assimp: {output_file}")
+            return True
         except Exception as e:
             self.log(f"Erreur assimp GLB: {e}")
             return False
@@ -473,7 +470,6 @@ class ExportEngine(BaseEngine):
         blender = shutil.which("blender")
         if blender:
             import json
-            import tempfile
             tmp_path = None
             blender_script = (
                 "import bpy, json\n"

@@ -14,6 +14,7 @@ keys, a config saved by an earlier version reloads without breaking.
 import json
 import logging
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 from .params import ColmapParams
 from .run_state import RunState
@@ -84,7 +85,7 @@ def _migrate(data: dict) -> dict:
     return data
 
 
-def save_config(name: str, config: ChainConfig | dict) -> "object":
+def save_config(name: str, config: ChainConfig | dict) -> Path:
     """Write a named configuration. Returns the file path."""
     if not is_safe_config_name(name):
         raise ValueError(f"Nom de configuration invalide: {name!r}")

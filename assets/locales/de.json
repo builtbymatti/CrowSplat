@@ -356,5 +356,6 @@
   "video_range_unreadable": "Videodauer nicht lesbar — Auswahl nicht möglich.",
   "video_range_no_frame": "Vorschau nicht verfügbar",
   "video_range_folder_hint": "Nur verfügbar, wenn ein einzelnes Video ausgewählt ist.",
-  "video_range_container_hint": "Für den Zuschnitt kein ideales Format: Marken können ungenau sitzen. Für exakte Positionierung in MP4 oder MOV konvertieren."
+  "video_range_container_hint": "Für den Zuschnitt kein ideales Format: Marken können ungenau sitzen. Für exakte Positionierung in MP4 oder MOV konvertieren.",
+  "err_project_name_invalid": "Ungültiger Projektname: darf weder „/“ noch „\\“ enthalten und nicht „.“ oder „..“ sein."
 }

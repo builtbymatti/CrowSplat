@@ -522,6 +522,10 @@ class SharpVideoWorker(BaseWorker):
     # that is what makes Qt deliver it queued, which this handshake relies on.
     long_run_signal = Signal(object, int, float)
 
+    # Sticky once stop() ran: a confirmation requested afterwards must not
+    # reset the answer to None and park the thread behind a dialog nobody wants.
+    _long_run_cancelled = False
+
     def __init__(self, video_path, output_path, params, engine=None):
         super().__init__()
         from app.core.sharp_engine import SharpEngine
@@ -538,6 +542,8 @@ class SharpVideoWorker(BaseWorker):
         self.engine.stop()
         # Release a run still waiting on the confirmation dialog, otherwise
         # Cancel would leave the thread parked for good.
+        with QMutexLocker(self._answer_mutex):
+            self._long_run_cancelled = True
         self.answer_long_run(False)
         super().stop()
 
@@ -555,6 +561,8 @@ class SharpVideoWorker(BaseWorker):
         until answer_long_run() — or stop() — wakes it.
         """
         with QMutexLocker(self._answer_mutex):
+            if self._long_run_cancelled:
+                return False
             self._long_run_accepted = None
 
         # Emitted outside the lock: were the connection ever direct, answering

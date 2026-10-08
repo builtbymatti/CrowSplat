@@ -163,7 +163,6 @@ def get_memory_info() -> dict:
     On Apple Silicon (UMA), memory_pressure is the most reliable indicator
     since GPU and CPU share the same pool.
     """
-    total = 0
     available = 0
     percent = 0.0
 
@@ -338,7 +337,7 @@ def get_brush_build_mode() -> str:
     version_file = resolve_project_root() / "engines" / "brush.version"
     try:
         if version_file.exists():
-            version = version_file.read_text().strip()
+            version = version_file.read_text(encoding="utf-8").strip()
             if version:
                 return "source" if "source" in version else "release"
     except OSError:
@@ -359,7 +358,6 @@ def log_numpy_backend() -> None:
     Accelerate is active.
     """
     try:
-        import contextlib
         import io
 
         import numpy as np

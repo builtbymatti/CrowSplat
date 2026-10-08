@@ -125,11 +125,12 @@ class BaseEngine:
         self.stop_requested = False
         self._last_thermal_check = 0.0
         self.thermal_throttling = thermal_throttling
+        # Must exist before _check_initial_thermal(): self.log() uses it, and the
+        # AttributeError was swallowed, so the startup warning never showed.
+        self.logger = logging.getLogger(self.name)
 
         # If thermal state is already serious at init time, warn immediately
         self._check_initial_thermal()
-
-        self.logger = logging.getLogger(self.name)
 
         # SOLID-DIP: abstract injection for tests (mockable)
         self.runner = process_runner or SubprocessRunner()
@@ -148,8 +149,8 @@ class BaseEngine:
                     f"les performances seront réduites.",
                     level=logging.WARNING
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.debug("Initial thermal check failed: %s", e)
 
     def _check_thermal_abort(self) -> bool:
         """Periodic thermal watchdog — checks state and returns True to abort.
@@ -183,8 +184,8 @@ class BaseEngine:
                     f"sous-processus en cours, attendez le refroidissement.",
                     level=logging.WARNING
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.debug("Thermal check failed: %s", e)
         return False
 
     def log(self, message, level=logging.INFO):
@@ -254,29 +255,28 @@ class BaseEngine:
                         self.runner.terminate()
                         return -1
 
+                # Checked every iteration, including select timeouts, so a
+                # silent process still honours cancellation and the watchdog.
+                if self.stop_requested:
+                    self.runner.terminate()
+                    return -1
+                if self._check_thermal_abort():
+                    return -1
+
                 line = self.runner.readline(timeout=min(remaining, read_timeout))
 
                 # None = select timeout (no data available yet), keep looping
                 if line is None:
-                    pass  # will loop back and re-check elapsed / stop_requested / thermal
-                elif line == "":
+                    continue
+                if line == "":
                     break  # EOF
-                else:
-                    last_output_time = _time.monotonic()  # reset inactivity timer on actual output
-                    if self.stop_requested:
-                        self.runner.terminate()
-                        return -1
-
-                    # Thermal watchdog every N seconds
-                    if self._check_thermal_abort():
-                        return -1
-
-                    stripped = line.strip()
-                    if stripped:
-                        if line_callback:
-                            line_callback(stripped)
-                        else:
-                            self.log(stripped)
+                last_output_time = _time.monotonic()  # reset inactivity timer on actual output
+                stripped = line.strip()
+                if stripped:
+                    if line_callback:
+                        line_callback(stripped)
+                    else:
+                        self.log(stripped)
 
             return self.runner.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -300,7 +300,13 @@ class BaseEngine:
                 process.terminate()
         else:
             process.terminate()
-        process.wait()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # SIGTERM ignored: escalate rather than block the caller forever.
+            process.kill()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=2)
 
     def validate_path(self, path):
         """Resolves a path and returns it. No containment checks."""

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import platform
 import shutil
 import sqlite3
@@ -76,15 +77,17 @@ def _apfs_copy(src: Path, dst: Path) -> None:
     Falls back to :func:`shutil.copy2` on other filesystems or platforms.
     Preserves metadata (timestamps, permissions) in both paths.
     """
-    if _CLONEFILE_FUNC is not None:
+    # ctypes does not raise on failure: clonefile returns -1 (cross-device,
+    # non-APFS volume, existing destination...), so test the return code.
+    if (
+        _CLONEFILE_FUNC is not None
+        and _CLONEFILE_FUNC(os.fsencode(src), os.fsencode(dst), 0) == 0
+    ):
         try:
-            _CLONEFILE_FUNC(str(src).encode(), str(dst).encode(), 0)
             # clonefile does not preserve metadata by itself
             shutil.copystat(str(src), str(dst))
             return
         except OSError:
-            # clonefile may fail cross-device, on non-APFS volumes, or for
-            # other kernel-level reasons — fall through to copy2 silently.
             pass
     shutil.copy2(str(src), str(dst))
 
@@ -730,7 +733,7 @@ class ColmapEngine(BaseEngine):
             return None, None
         return (start or None), end - start
 
-    def extract_frames_from_video(self, video_path: str, images_dir: Path, prefix: str | None = None) -> bool | None:
+    def extract_frames_from_video(self, video_path: str, images_dir: Path, prefix: str | None = None) -> bool:
         """Extract the frames of a video through FFmpeg."""
         base_name = Path(video_path).stem
         self.log(f"\n{'='*60}\nExtraction frames: {Path(video_path).name}\n{'='*60}")
@@ -780,7 +783,7 @@ class ColmapEngine(BaseEngine):
             # Big videos / slow external drives: same ceiling as Brush (4h).
             returncode = self._execute_command(cmd, line_callback=_ffmpeg_parser, timeout=14400)
             if self.is_cancelled():
-                return None
+                return False
 
             if returncode != 0 and "-hwaccel" in cmd:
                 # VideoToolbox refuses some streams (ProRes, 10-bit HEVC in a
@@ -790,7 +793,7 @@ class ColmapEngine(BaseEngine):
                     without_hwaccel(cmd), line_callback=_ffmpeg_parser, timeout=14400
                 )
                 if self.is_cancelled():
-                    return None
+                    return False
 
             if returncode == 0:
                 num_frames = len([f for f in images_dir.iterdir() if f.suffix == '.jpg'])
@@ -798,7 +801,7 @@ class ColmapEngine(BaseEngine):
                 return True
             else:
                 self.log("Erreur lors de l'extraction")
-                return None
+                return False
         except Exception as e:
             self.log(f"Erreur: {str(e)}")
             return False
@@ -1033,13 +1036,9 @@ class ColmapEngine(BaseEngine):
             "parameters": self.params.to_dict()
         }
         config_path = output_dir / "brush_config.json"
-        with open(config_path, 'w') as f:
+        with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2)
         self.log(f"Configuration Brush créée: {config_path}")
-
-    def stop(self):
-        """Stop the running process."""
-        super().stop()
 
     @staticmethod
     def delete_project_content(target_path: Path) -> tuple[bool, str]:

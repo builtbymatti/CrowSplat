@@ -18,6 +18,7 @@ dynamically and managed by ``PageRegistry``.
 
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -42,7 +43,7 @@ from app.core.config_io import (
     save_config,
 )
 from app.core.engine import ColmapEngine
-from app.core.i18n import add_language_observer, tr
+from app.core.i18n import add_language_observer, get_current_lang, tr
 from app.core.run_state import PIPELINE_STEPS, RunState, StepStatus
 from app.gui.activity_bar import ActivityBar
 from app.gui.appbar import AppBar
@@ -95,6 +96,21 @@ from app.gui.workers import (
 # Stacked page order (PIPELINE steps, then OUTILS modules).
 _PAGE_KEYS = tuple(PIPELINE_STEPS) + tuple(TOOL_KEYS)
 
+# Languages written right-to-left: the whole UI is mirrored for them (G3).
+_RTL_LANGS = frozenset({"ar"})
+
+
+def _is_safe_project_name(name):
+    """True when ``name`` stays a single folder under the output path.
+
+    The project name is joined to the output folder everywhere
+    (``Path(output) / project``): "..", "." or a separator would point the
+    run — or the "delete dataset" button — at a folder outside the project.
+    Same rule ColmapEngine already enforces on its side.
+    """
+    name = (name or "").strip()
+    return name not in ("", ".", "..") and "/" not in name and "\\" not in name
+
 
 class StudioWindow(QMainWindow):
     """Four-zone shell. Rail selection → swaps the centre + right page."""
@@ -140,6 +156,7 @@ class StudioWindow(QMainWindow):
         self._tool_ply_root = None
         self._tool_producer_label = None
         self.init_ui()
+        self._apply_layout_direction()
         set_dark_theme(QApplication.instance())
         add_language_observer(self.retranslate_ui)
         # Last project (Source paths): reloaded before the window is shown,
@@ -262,13 +279,9 @@ class StudioWindow(QMainWindow):
         # Pages added in _PAGE_KEYS order: their index matches PageRegistry's
         # (a counter), deterministic even under a mocked PySide6.
         for key in _PAGE_KEYS:
-            panel = self.panels.get(key)
-            if panel is not None:
-                self.center_stack.addWidget(panel.center)
-                self.right_stack.addWidget(panel.right)
-            else:
-                self.center_stack.addWidget(self._placeholder(key, "center"))
-                self.right_stack.addWidget(self._placeholder(key, "right"))
+            panel = self.panels[key]
+            self.center_stack.addWidget(panel.center)
+            self.right_stack.addWidget(panel.right)
 
         root.addLayout(body, stretch=1)
 
@@ -366,12 +379,6 @@ class StudioWindow(QMainWindow):
         line.setStyleSheet("color: #2f3549; background-color: #2f3549;")
         return line
 
-    def _placeholder(self, key, zone):
-        """Temporary page (replaced by the real panel in batches 3-5)."""
-        w = QLabel(f"[{zone}] {key} — à venir")
-        w.setObjectName(f"placeholder_{zone}_{key}")
-        return w
-
     # ── Navigation ──────────────────────────────────────────────────────────────
     def on_rail_selected(self, key):
         """Rail selection changes the page. If the step failed, opens the log
@@ -413,6 +420,15 @@ class StudioWindow(QMainWindow):
             if button is not None:
                 button.setEnabled(bool(enabled))
 
+    def _reset_run_ui(self):
+        """Back to the idle state once nothing runs anymore: Launch instead of
+        Cancel, local Launch buttons re-enabled, activity bar and ring cleared."""
+        self.panels["source"].set_running(False)
+        self._set_cancel_enabled(False)
+        self._set_tool_launch_buttons_enabled(True)
+        self.activity_bar.reset_activity()
+        self.panels["source"].progress_ring.stop()
+
     def _set_tool_launch_buttons_enabled(self, enabled: bool):
         """Grey out every panel's local "Lancer" button while a worker is
         active (L3-12), Source's own Launch/Cancel excluded (toggled
@@ -426,9 +442,6 @@ class StudioWindow(QMainWindow):
             button = getattr(panel, "btn_run", None)
             if button is not None:
                 button.setEnabled(bool(enabled))
-
-    def current_page_key(self):
-        return self.nav.current
 
     def _on_source_mode_changed(self, _index=None):
         """React to SourcePanel's pipeline mode selector (D4/L5-09).
@@ -479,6 +492,10 @@ class StudioWindow(QMainWindow):
         (statuses + auto-follow) and the breadcrumb.
         """
         mode = self.panels["source"].current_mode()
+        project_name = self.panels["source"].get_state()["project_name"]
+        if project_name.strip() and not _is_safe_project_name(project_name):
+            self._fail_pipeline_step("source", self._invalid_project_name_message())
+            return []
         plan = plan_pipeline(mode, self.run_state)
         self.current_plan = plan
         # The plan only names steps; "reconstruction" means COLMAP, Sharp or the
@@ -494,6 +511,14 @@ class StudioWindow(QMainWindow):
         if plan:
             self._run_pipeline_step(0)
         return plan
+
+    @staticmethod
+    def _invalid_project_name_message():
+        return tr(
+            "err_project_name_invalid",
+            "Nom de projet invalide : il ne doit pas contenir « / », « \\ » "
+            "ni être « . » ou « .. ».",
+        )
 
     def update_breadcrumb(self, plan):
         self.breadcrumb.setText(" → ".join(plan))
@@ -923,8 +948,6 @@ class StudioWindow(QMainWindow):
             keep_only_latest=keeps_only_latest_checkpoint(source_state),
         )
 
-
-
     # ── Pre-filling the OUTILS post-steps from the previous step's output
     # (cf. Section G: Entraînement → Nettoyage → Export → Visualiser chaining,
     # only when the matching ``run_state`` flag is on) ────────────────────────────────
@@ -1163,11 +1186,7 @@ class StudioWindow(QMainWindow):
         stopped_by_user = bool(worker and getattr(worker, "stopped_by_user", False))
         self.run_state.set_status(step, StepStatus.ERROR)
         self.rail.set_step_status(step, StepStatus.ERROR)
-        self.panels["source"].set_running(False)
-        self._set_cancel_enabled(False)
-        self._set_tool_launch_buttons_enabled(True)
-        self.activity_bar.reset_activity()
-        self.panels["source"].progress_ring.stop()
+        self._reset_run_ui()
         if not stopped_by_user:
             self.notify(tr("msg_error", "Erreur"), message)
             self._show_error_dialog(message)
@@ -1179,11 +1198,7 @@ class StudioWindow(QMainWindow):
         self.run_state.set_status(step, StepStatus.ERROR)
         self.rail.set_step_status(step, StepStatus.ERROR)
         self.logs_window.append_log(message)
-        self.panels["source"].set_running(False)
-        self._set_cancel_enabled(False)
-        self._set_tool_launch_buttons_enabled(True)
-        self.activity_bar.reset_activity()
-        self.panels["source"].progress_ring.stop()
+        self._reset_run_ui()
         self._active_worker = None
         self.notify(tr("msg_error", "Erreur"), message)
         self._show_error_dialog(message)
@@ -1209,11 +1224,7 @@ class StudioWindow(QMainWindow):
     def _finish_pipeline_chain(self, success, message):
         """End (normal or deliberately interrupted) of the pipeline chain."""
         self._active_worker = None
-        self.panels["source"].set_running(False)
-        self._set_cancel_enabled(False)
-        self._set_tool_launch_buttons_enabled(True)
-        self.activity_bar.reset_activity()
-        self.panels["source"].progress_ring.stop()
+        self._reset_run_ui()
         self.logs_window.append_log(message)
         if success:
             self.notify(tr("msg_success", "Succès"), message)
@@ -1304,11 +1315,7 @@ class StudioWindow(QMainWindow):
             self.logs_window.append_log(message)
             self._run_tool_post_steps(post_steps)
             return
-        self.panels["source"].set_running(False)
-        self._set_cancel_enabled(False)
-        self._set_tool_launch_buttons_enabled(True)
-        self.activity_bar.reset_activity()
-        self.panels["source"].progress_ring.stop()
+        self._reset_run_ui()
         self.logs_window.append_log(message)
         stopped_by_user = bool(worker and getattr(worker, "stopped_by_user", False))
         if success:
@@ -1404,22 +1411,6 @@ class StudioWindow(QMainWindow):
             self.current_pipeline_mode = "gsplat"
             self._start_tool_worker(
                 worker, post_steps=self._post_steps_from_flags("entrainement", "visualiser")
-            )
-
-    def _launch_entrainement(self):
-        """Standalone run (outside the chain) of the Entraînement tab (PIPELINE),
-        same idiom as ``_launch_reconstruction``. Reuses
-        ``_build_brush_worker`` — dataset = the project folder produced by
-        COLMAP (Source/output + project name), NOT the manual
-        ``input_path``/``output_path`` fields of standalone mode (those are
-        never filled in here and would point at the wrong folder, cf. the
-        OUTILS "Brush" module for manual use).
-        """
-        worker = self._build_brush_worker()
-        if worker is not None:
-            self.current_pipeline_mode = "gsplat"
-            self._start_tool_worker(
-                worker, post_steps=self._post_steps_from_flags("visualiser")
             )
 
     def _fourdgs_upscale_params(self, params):
@@ -1587,6 +1578,11 @@ class StudioWindow(QMainWindow):
         project_name = source_state["project_name"].strip()
         if not self._check_paths(output_path, project_name):
             return
+        if not _is_safe_project_name(project_name):
+            QMessageBox.critical(
+                self, tr("msg_error", "Erreur"), self._invalid_project_name_message()
+            )
+            return
         target = Path(output_path) / project_name
         reply = QMessageBox.question(
             self, tr("source_delete_dataset", "Supprimer le dataset existant"),
@@ -1721,7 +1717,17 @@ class StudioWindow(QMainWindow):
         """
         AppLifecycle.reset_factory(deep)
 
+    def _apply_layout_direction(self):
+        """Mirror the whole UI for right-to-left languages (Arabic), back to
+        left-to-right otherwise. Application-wide, so dialogs follow too."""
+        direction = (
+            Qt.LayoutDirection.RightToLeft if get_current_lang() in _RTL_LANGS
+            else Qt.LayoutDirection.LeftToRight
+        )
+        QApplication.setLayoutDirection(direction)
+
     def retranslate_ui(self):
+        self._apply_layout_direction()
         self.setWindowTitle(tr("app_title"))
         self.btn_settings.setText(f"⚙ {tr('btn_settings_label', 'Paramètres')}")
         self.btn_logs.setText(f"▤ {tr('logbar_title', 'Logs')}")

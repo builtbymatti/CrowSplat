@@ -48,7 +48,7 @@ class UpscaylModel:
 
 
 # ---------------------------------------------------------------------------
-# Catalogue  (6 models, each with a distinct use case)
+# Catalogue  (5 models, each with a distinct use case)
 # ---------------------------------------------------------------------------
 
 MODELS: list[UpscaylModel] = [

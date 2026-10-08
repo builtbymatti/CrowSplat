@@ -7,6 +7,7 @@ import socketserver
 import threading
 import time
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -175,7 +176,20 @@ class SuperSplatEngine(BaseEngine):
                 # The header varies with the request Origin: without this, a shared
                 # cache could serve one origin's response to another.
                 self.send_header('Vary', 'Origin')
+                self.send_header('X-Content-Type-Options', 'nosniff')
+                self.send_header('X-Frame-Options', 'DENY')
                 super().end_headers()
+
+            def send_head(self):  # pragma: no cover – exercised via runtime
+                # Loopback binding alone does not stop DNS rebinding: a hostile
+                # domain re-resolved to 127.0.0.1 would be same-origin with this
+                # server and could read the served folder. Only answer requests
+                # addressed to a loopback host name.
+                host = urlparse(f"//{self.headers.get('Host', '')}").hostname
+                if host not in ('localhost', '127.0.0.1'):
+                    self.send_error(403)
+                    return None
+                return super().send_head()
 
             def log_message(self, format, *args):  # Suppress noisy default logging
                 return
@@ -183,7 +197,6 @@ class SuperSplatEngine(BaseEngine):
         class _ReuseAddrTCPServer(socketserver.TCPServer):
             allow_reuse_address = True
 
-        from functools import partial
         handler = partial(CORSRequestHandler, directory=str(dir_path))
 
         # Bound here rather than inside the thread. Assigning self.httpd from the

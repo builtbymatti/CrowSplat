@@ -356,27 +356,29 @@ class SharpEngine(BaseEngine):
             return _abort("--- Annulé avant le démarrage ---")
 
         success_count = 0
-        for idx, frame_path in enumerate(frames):
-            # stop() sets stop_requested without going through cancel_check —
-            # testing only the latter left stop() unable to interrupt the loop.
-            if self.stop_requested or (cancel_check and cancel_check()):
+        # try/finally: an exception from one frame (disk full on copy2...)
+        # must not strand the extracted frames in the output folder.
+        try:
+            for idx, frame_path in enumerate(frames):
+                # stop() sets stop_requested without going through cancel_check —
+                # testing only the latter left stop() unable to interrupt the loop.
+                if self.stop_requested or (cancel_check and cancel_check()):
+                    if log_callback:
+                        log_callback("--- Arrêté par l'utilisateur ---")
+                    break
+
+                display_idx = idx + 1
+                if status_callback:
+                    status_callback(f"Processing frame {display_idx}/{total_frames}")
                 if log_callback:
-                    log_callback("--- Arrêté par l'utilisateur ---")
-                break
+                    log_callback(f"Processing frame {display_idx}/{total_frames}: {frame_path.name}")
 
-            display_idx = idx + 1
-            if status_callback:
-                status_callback(f"Processing frame {display_idx}/{total_frames}")
-            if log_callback:
-                log_callback(f"Processing frame {display_idx}/{total_frames}: {frame_path.name}")
+                if self._predict_one_frame(frame_path, out, params, log_callback):
+                    success_count += 1
 
-            if self._predict_one_frame(frame_path, out, params, log_callback):
-                success_count += 1
-
-            if progress_callback:
-                progress_callback(int((display_idx / total_frames) * 100))
-
-        if frames_dir.exists():
+                if progress_callback:
+                    progress_callback(int((display_idx / total_frames) * 100))
+        finally:
             shutil.rmtree(frames_dir, ignore_errors=True)
 
         return success_count

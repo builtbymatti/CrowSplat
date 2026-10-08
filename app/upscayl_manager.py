@@ -296,9 +296,13 @@ def run_upscayl(input_path, output_path, params,
         cmd = cmd_base + ["-t", str(cur_tile)]
         _log(f"upscayl-bin: {' '.join(cmd)}")
         crashed = False
+        proc = None
         try:
+            # errors="replace": a non-UTF-8 byte in upscayl-bin's output must not
+            # abort the read loop with UnicodeDecodeError mid-run.
             proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                errors="replace",
             )
             for line in proc.stdout:
                 if cancel_check and cancel_check():
@@ -324,6 +328,10 @@ def run_upscayl(input_path, output_path, params,
                 break
         except Exception as e:
             _log(f"❌ Exception upscayl : {e}")
+            # Never leave upscayl-bin running (and the GPU busy) behind us.
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+                proc.wait()
             break
 
         if success or not crashed:

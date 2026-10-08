@@ -264,7 +264,7 @@ class ReconstructionPanel:
     def _bind(self, checkbox, flag):
         self._bindings.append(bind_flag_checkbox(checkbox, self.run_state, flag))
 
-    # ── Comportements ────────────────────────────────────────────────────────────
+    # ── Behaviour ────────────────────────────────────────────────────────────────
     def _on_feature_type_changed(self, feat_type):
         compatible = COMPATIBLE_MATCHING.get(feat_type, ['SIFT_BRUTEFORCE'])
         self.matching_algo_combo.clear()

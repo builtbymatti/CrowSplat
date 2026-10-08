@@ -39,7 +39,7 @@ def relax_requirements(src, dst):
 def get_remote_version(repo_url):
     """Gets the latest commit hash from the remote git repository"""
     try:
-        output = subprocess.check_output(["git", "ls-remote", repo_url, "HEAD"], text=True).strip()
+        output = subprocess.check_output(["git", "ls-remote", repo_url, "HEAD"], text=True, timeout=10).strip()
         if output:
             return output.split()[0]
     except Exception as e:
@@ -111,22 +111,14 @@ def install_node_js():
         return False
 
 
-def install_build_tools():
-    print("Installing CMake & Ninja via Homebrew...")
-    try:
-        subprocess.check_call(["brew", "install", "cmake", "ninja"])
-        return True
-    except (subprocess.CalledProcessError, OSError) as e:
-        print(f"Error installing build tools: {e}")
-        return False
-
-
 def install_rust_toolchain():
     print("Installing Rust (cargo)...")
     import tempfile
     import urllib.request
+    fd, tmp_name = tempfile.mkstemp(suffix=".sh")
+    os.close(fd)
+    rustup_path = Path(tmp_name)
     try:
-        rustup_path = Path(tempfile.mkstemp(suffix=".sh")[1])
         req = urllib.request.Request("https://sh.rustup.rs")
         with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310 - literal https URL (sh.rustup.rs)
             rustup_path.write_bytes(resp.read())
@@ -136,7 +128,6 @@ def install_rust_toolchain():
         # Fail-closed: an unknown or mismatching hash aborts the install rather
         # than executing an unverified shell script.
         if not verify_download_strict(rustup_path, checksums.get(checksum_key, "")):
-            rustup_path.unlink(missing_ok=True)
             print(
                 f"❌ rustup installer SHA256 mismatch or missing reference hash "
                 f"(checksum key: {checksum_key}) — installation refusée."
@@ -145,7 +136,6 @@ def install_rust_toolchain():
 
         rustup_path.chmod(0o755)
         subprocess.check_call([str(rustup_path), "-y"])
-        rustup_path.unlink()
 
         # Add to current path for this session
         cargo_bin = Path.home() / ".cargo" / "bin"
@@ -155,6 +145,8 @@ def install_rust_toolchain():
             return True
     except Exception as e:
         print(f"Error installing Rust: {e}")
+    finally:
+        rustup_path.unlink(missing_ok=True)
     return False
 
 

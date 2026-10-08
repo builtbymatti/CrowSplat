@@ -12,12 +12,53 @@ class BrushEngine(BaseEngine):
     Provides path validation, secure command construction, and structured logging.
     """
 
-    ALLOWED_FLAGS = {
-        "--save-iterations", "--log-level", "--test-split",
+    # Extra-args allowlist, split by build mode. The pinned release (v0.3.0)
+    # and a source build (git main) do not accept the same options: the lists
+    # below were read from `brush --help` of the release binary and from the
+    # clap structs of main (crates/brush-{process,train,dataset}/src/config.rs,
+    # apps/brush-cli/src/lib.rs) on 2026-10-08. A source build tracks HEAD, so
+    # SOURCE_ONLY_FLAGS is a snapshot: refresh it from `brush --help` of the
+    # compiled binary when a flag goes missing. Flags build_command() emits
+    # itself (--export-path, --total-steps/--total-train-iters, --sh-degree,
+    # --with-viewer) are deliberately absent. --save-iterations, --refine-pose,
+    # --log-level and --test-split used to be listed although no Brush version
+    # knows them (audit D14): a preset using one made Brush abort.
+    COMMON_FLAGS = frozenset({
         "--start-iter", "--refine-every", "--growth-grad-threshold",
         "--growth-select-fraction", "--growth-stop-iter", "--max-splats",
-        "--eval-every", "--export-every", "--max-resolution", "--refine-pose"
-    }
+        "--eval-every", "--eval-save-to-disk", "--eval-split-every",
+        "--export-every", "--export-name", "--max-resolution", "--max-frames",
+        "--subsample-frames", "--subsample-points", "--seed",
+        "--lr-mean", "--lr-mean-end", "--lr-coeffs-dc", "--lr-coeffs-sh-scale",
+        "--lr-opac", "--lr-rotation", "--lr-scale",
+        "--ssim-weight", "--lpips-loss-weight", "--match-alpha-weight",
+        "--mean-noise-weight",
+    })
+    RELEASE_ONLY_FLAGS = frozenset({
+        "--aux-loss-time", "--lr-scale-end", "--opac-loss-weight",
+        "--scale-loss-weight", "--rerun-enabled", "--rerun-log-splats-every",
+        "--rerun-log-train-stats-every", "--rerun-max-img-size",
+    })
+    SOURCE_ONLY_FLAGS = frozenset({
+        "--alpha-mode", "--background-color", "--background-noise-strength",
+        "--growth-start-iter", "--invert-masks", "--lod-decimation-keep",
+        "--lod-image-scale", "--lod-levels", "--lod-refine-steps",
+        "--max-scene-batch-cache-size", "--min-scale-factor", "--opac-decay",
+        "--random-init-scene-scale", "--render-mode", "--split-at-screen-size",
+        "--units-per-meter",
+    })
+    # Union, kept for callers that only need "is this a Brush flag at all".
+    ALLOWED_FLAGS = COMMON_FLAGS | RELEASE_ONLY_FLAGS | SOURCE_ONLY_FLAGS
+
+    @classmethod
+    def allowed_flags(cls, build_mode: str | None) -> frozenset[str]:
+        """Flags accepted in custom_args for this build mode.
+
+        Anything but "release" counts as a source build, the same rule
+        build_command() applies to the total-steps spelling.
+        """
+        extra = cls.RELEASE_ONLY_FLAGS if build_mode == "release" else cls.SOURCE_ONLY_FLAGS
+        return cls.COMMON_FLAGS | extra
 
     def __init__(self, logger_callback: Callable | None = None, thermal_throttling: bool = False) -> None:
         """Initialize the Brush engine.
@@ -93,16 +134,23 @@ class BrushEngine(BaseEngine):
 
         custom_args = params.get("custom_args")
         if custom_args:
+            build_mode = params.get("build_mode")
+            allowed = self.allowed_flags(build_mode)
             args_list = custom_args.split()
             safe_args = []
             i = 0
             while i < len(args_list):
                 arg = args_list[i]
-                if arg in self.ALLOWED_FLAGS:
+                if arg in allowed:
                     safe_args.append(arg)
                     if i + 1 < len(args_list) and not args_list[i + 1].startswith("--"):
                         safe_args.append(args_list[i + 1])
                         i += 1
+                elif arg in self.ALLOWED_FLAGS:
+                    # A real Brush flag, but for the other build mode: say so,
+                    # the user may just have picked the wrong mode.
+                    other = "source" if build_mode == "release" else "release"
+                    self.log(f"Avertissement: {arg} n'existe que dans le build Brush « {other} », ignoré")
                 else:
                     self.log(f"Avertissement de sécurité: paramètre non autorisé ignoré ({arg})")
                 i += 1

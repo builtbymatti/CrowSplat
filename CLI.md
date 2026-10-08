@@ -173,7 +173,7 @@ python3 main.py brush -i ~/projects/my_scene -o ~/projects/my_scene --preset fas
 | `--refine_mode` | — | Resume from the latest checkpoint |
 | `--with_viewer` | — | Open the interactive viewer |
 | `--ply_name` | — | Output PLY filename |
-| `--custom_args` | — | Extra flags passed directly to brush |
+| `--custom_args` | — | Extra flags passed directly to brush. Only flags of the installed build are kept: the release (v0.3.0) and a source build accept different options (`BrushEngine.COMMON_FLAGS` + `RELEASE_ONLY_FLAGS` / `SOURCE_ONLY_FLAGS`); anything else is dropped with a warning |
 
 **Preset values**
 

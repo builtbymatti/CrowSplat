@@ -67,6 +67,11 @@ class ReconstructionPanel:
 
     # ── Center (resume + project + chaining + accordions) ───────────────────────
     def _build_center(self):
+        """Assemble the centre column from its sections.
+
+        Was one ~190-line body (audit M11). Each section still runs in the
+        same order on the same layout, so the widget tree is unchanged.
+        """
         w = QWidget()
         outer = QVBoxLayout(w)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -77,7 +82,28 @@ class ReconstructionPanel:
         content = QWidget()
         layout = QVBoxLayout(content)
 
+        self._build_resume_and_chaining(layout)
+        self._build_extraction_group(layout)
+        self._build_matching_group(layout)
+        self._build_mapper_group(layout)
 
+        layout.addStretch(1)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+        self._update_sequential_enabled()
+
+        # Local Launch button (bottom of center, same idiom as other panels).
+        # Wiring (StudioWindow._launch_reconstruction) is done by a later pass.
+        self.btn_run = QPushButton()
+        self.btn_run.setStyleSheet("font-weight: bold;")
+        outer.addWidget(self.btn_run)
+
+        self.btn_cancel = CancelButton()
+        outer.addWidget(self.btn_cancel)
+        return w
+
+    def _build_resume_and_chaining(self, layout):
+        """Apple Silicon banner, COLMAP resume field and chaining toggles."""
         # Apple Silicon banner (carried over as-is from ParamsTab)
         self.info_label = QLabel()
         self.info_label.setWordWrap(True)
@@ -108,6 +134,8 @@ class ReconstructionPanel:
         self._bind(self.chk_visualiser, "visualiser_apres")
         layout.addWidget(self.chk_visualiser)
 
+    def _build_extraction_group(self, layout):
+        """Feature Extraction accordion."""
         # ── Migrated from _build_right: Feature Extraction / Matching / Mapper accordions ──
         self.extract_group = QGroupBox()
         ex = QFormLayout(self.extract_group)
@@ -147,6 +175,8 @@ class ReconstructionPanel:
         ex.addRow(self.lbl_feature_type, self.feature_type_combo)
         layout.addWidget(self.extract_group)
 
+    def _build_matching_group(self, layout):
+        """Matching accordion."""
         # Matching
         self.match_group = QGroupBox()
         mt = QFormLayout(self.match_group)
@@ -193,6 +223,8 @@ class ReconstructionPanel:
         mt.addRow(self.lbl_min_match, self.min_matches_spin)
         layout.addWidget(self.match_group)
 
+    def _build_mapper_group(self, layout):
+        """Mapper accordion (plus the undistort toggle bound to run_state)."""
         # Mapper
         self.mapper_group = QGroupBox()
         mp = QFormLayout(self.mapper_group)
@@ -225,21 +257,6 @@ class ReconstructionPanel:
         self.lbl_undistort = QLabel()
         mp.addRow(self.lbl_undistort, self.undistort_check)
         layout.addWidget(self.mapper_group)
-
-        layout.addStretch(1)
-        scroll.setWidget(content)
-        outer.addWidget(scroll)
-        self._update_sequential_enabled()
-
-        # Local Launch button (bottom of center, same idiom as other panels).
-        # Wiring (StudioWindow._launch_reconstruction) is done by a later pass.
-        self.btn_run = QPushButton()
-        self.btn_run.setStyleSheet("font-weight: bold;")
-        outer.addWidget(self.btn_run)
-
-        self.btn_cancel = CancelButton()
-        outer.addWidget(self.btn_cancel)
-        return w
 
     def _build_right(self):
         return QWidget()

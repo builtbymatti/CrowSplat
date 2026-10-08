@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.cli.commands import BRUSH_PRESETS
+from app.core.brush_engine import BrushEngine
 from app.core.brush_params import BrushParams
 from app.core.brush_presets import (
     delete_user_preset,
@@ -73,6 +74,11 @@ class EntrainementPanel:
 
     # ── Center (manual mode + tracking + preset → essential → advanced) ────────
     def _build_center(self):
+        """Assemble the centre column from its sections.
+
+        Was one ~190-line body (audit M11). Each section still runs in the
+        same order on the same layout, so the widget tree is unchanged.
+        """
         w = QWidget()
         outer = QVBoxLayout(w)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -83,6 +89,41 @@ class EntrainementPanel:
         content = QWidget()
         layout = QVBoxLayout(content)
 
+        self._build_manual_group(layout)
+        self._build_preset_row(layout)
+        self._build_essentials(layout)
+        self._build_advanced(layout)
+        self._build_densification(layout)
+        self._build_checkpoints(layout)
+        self._build_release_options(layout)
+        self._build_source_options(layout)
+        self._sync_build_mode_groups()
+
+        layout.addStretch(1)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+
+        # Local Launch button: standalone mode only (the OUTILS "Brush"
+        # module), where the user fills the input/output fields by hand.
+        #
+        # Deliberately absent from the PIPELINE Training tab. It existed there
+        # briefly and was removed on request: that tab has no manual paths, so
+        # the button had to infer them, and an early version inferred them
+        # wrongly and moved a user's project folder through the checkpoint
+        # archiving logic. Training inside the chain is started by the single
+        # Launch button in Source, or automatically after Reconstruction when
+        # "Lancer Brush" is ticked (StudioWindow._on_reconstruction_standalone_finished).
+        if self.standalone:
+            self.btn_run = QPushButton()
+            self.btn_run.setStyleSheet("font-weight: bold;")
+            outer.addWidget(self.btn_run)
+
+            self.btn_cancel = CancelButton()
+            outer.addWidget(self.btn_cancel)
+        return w
+
+    def _build_manual_group(self, layout):
+        """Manual/standalone paths (dataset, export, PLY name) and the Visualize toggle."""
         self.manual_group = QGroupBox()
         mg = QVBoxLayout(self.manual_group)
         self.lbl_dataset = QLabel()
@@ -114,6 +155,8 @@ class EntrainementPanel:
         self._bind(self.chk_visualiser, "visualiser_apres")
         layout.addWidget(self.chk_visualiser)
 
+    def _build_preset_row(self, layout):
+        """Preset dropdown with save/delete buttons."""
         # ── Migrated from _build_right: preset → essential → advanced ──────────
         # Preset + save
         preset_row = QHBoxLayout()
@@ -131,6 +174,8 @@ class EntrainementPanel:
         layout.addLayout(preset_row)
         self._sync_delete_preset_enabled()
 
+    def _build_essentials(self, layout):
+        """Essential fields: steps, SH degree, max splats, device."""
         # Essentials
         essential = QFormLayout()
         essential.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)  # avoid horizontal overflow (long labels)
@@ -160,6 +205,8 @@ class EntrainementPanel:
         essential.addRow(self.lbl_device, self.device_combo)
         layout.addLayout(essential)
 
+    def _build_advanced(self, layout):
+        """Advanced toggle and its hidden form (resolution, extra args, viewer, build mode)."""
         # Advanced (persisted later — Batch 6)
         self.btn_advanced = QPushButton()
         self.btn_advanced.setCheckable(True)
@@ -192,11 +239,16 @@ class EntrainementPanel:
         idx = self.combo_build_mode.findData(get_brush_build_mode())
         if idx >= 0:
             self.combo_build_mode.setCurrentIndex(idx)
+        # The release and a source build accept different extra options; the
+        # tooltip on the extra-args field lists the ones the chosen mode takes.
+        self.combo_build_mode.currentIndexChanged.connect(self._sync_args_tooltip)
         self.lbl_build_mode = QLabel()
         ag.addRow(self.lbl_build_mode, self.combo_build_mode)
         self.advanced_group.setVisible(False)
         layout.addWidget(self.advanced_group)
 
+    def _build_densification(self, layout):
+        """Densification accordion."""
         # Densification (collapsible)
         self.densif_group = QGroupBox()
         self.densif_group.setCheckable(True)
@@ -232,6 +284,8 @@ class EntrainementPanel:
         dg.addRow(self.lbl_growth_stop, self.spin_growth_stop)
         layout.addWidget(self.densif_group)
 
+    def _build_checkpoints(self, layout):
+        """Checkpoints accordion (interval, New/Refine mode)."""
         # Checkpoints (collapsible)
         self.ckpt_group = QGroupBox()
         self.ckpt_group.setCheckable(True)
@@ -243,6 +297,13 @@ class EntrainementPanel:
         self.spin_checkpoint_interval.setValue(7000)
         self.lbl_ckpt_interval = QLabel()
         cg.addRow(self.lbl_ckpt_interval, self.spin_checkpoint_interval)
+        # Eval cadence (audit D14): 0 means "never", the Brush default. Folded
+        # into custom_args by BrushParams, so the engine tokens stay allowlisted.
+        self.spin_eval_every = QSpinBox()
+        self.spin_eval_every.setRange(0, 1_000_000)
+        self.spin_eval_every.setValue(0)
+        self.lbl_eval_every = QLabel()
+        cg.addRow(self.lbl_eval_every, self.spin_eval_every)
         self.combo_mode = QComboBox()
         self.combo_mode.addItem("", "new")
         self.combo_mode.addItem("", "refine")
@@ -250,28 +311,124 @@ class EntrainementPanel:
         cg.addRow(self.lbl_mode, self.combo_mode)
         layout.addWidget(self.ckpt_group)
 
-        layout.addStretch(1)
-        scroll.setWidget(content)
-        outer.addWidget(scroll)
+    # The release (v0.3.0) and a source build (git main) do not take the same
+    # options. Each gets its own collapsible group, shown only for the build
+    # mode selected under "Advanced"; an unchecked group sends nothing, so
+    # Brush keeps its own defaults (the values pre-filled below are those
+    # defaults, read from `brush --help` / the clap structs on 2026-10-08).
+    def _build_release_options(self, layout):
+        """Options that only the pinned release accepts."""
+        self.release_group = QGroupBox()
+        self.release_group.setCheckable(True)
+        self.release_group.setChecked(False)
+        rg = QFormLayout(self.release_group)
+        rg.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        self.spin_lr_scale_end = QDoubleSpinBox()
+        self.spin_lr_scale_end.setRange(0.0, 1.0)
+        self.spin_lr_scale_end.setDecimals(5)
+        self.spin_lr_scale_end.setSingleStep(0.001)
+        self.spin_lr_scale_end.setValue(0.006)
+        self.lbl_lr_scale_end = QLabel()
+        rg.addRow(self.lbl_lr_scale_end, self.spin_lr_scale_end)
+        # Loss weights are tiny (1e-9): a spinbox cannot show them, so free
+        # text with the Brush default as placeholder; empty = default.
+        self.edit_opac_loss_weight = QLineEdit()
+        self.edit_opac_loss_weight.setPlaceholderText("1e-9")
+        self.lbl_opac_loss_weight = QLabel()
+        rg.addRow(self.lbl_opac_loss_weight, self.edit_opac_loss_weight)
+        self.edit_scale_loss_weight = QLineEdit()
+        self.edit_scale_loss_weight.setPlaceholderText("1e-8")
+        self.lbl_scale_loss_weight = QLabel()
+        rg.addRow(self.lbl_scale_loss_weight, self.edit_scale_loss_weight)
+        self.spin_aux_loss_time = QDoubleSpinBox()
+        self.spin_aux_loss_time.setRange(0.0, 1.0)
+        self.spin_aux_loss_time.setDecimals(2)
+        self.spin_aux_loss_time.setSingleStep(0.05)
+        self.spin_aux_loss_time.setValue(0.9)
+        self.lbl_aux_loss_time = QLabel()
+        rg.addRow(self.lbl_aux_loss_time, self.spin_aux_loss_time)
+        layout.addWidget(self.release_group)
 
-        # Local Launch button: standalone mode only (the OUTILS "Brush"
-        # module), where the user fills the input/output fields by hand.
-        #
-        # Deliberately absent from the PIPELINE Training tab. It existed there
-        # briefly and was removed on request: that tab has no manual paths, so
-        # the button had to infer them, and an early version inferred them
-        # wrongly and moved a user's project folder through the checkpoint
-        # archiving logic. Training inside the chain is started by the single
-        # Launch button in Source, or automatically after Reconstruction when
-        # "Lancer Brush" is ticked (StudioWindow._on_reconstruction_standalone_finished).
-        if self.standalone:
-            self.btn_run = QPushButton()
-            self.btn_run.setStyleSheet("font-weight: bold;")
-            outer.addWidget(self.btn_run)
+    def _build_source_options(self, layout):
+        """Options that only a source build (git main) accepts."""
+        self.source_group = QGroupBox()
+        self.source_group.setCheckable(True)
+        self.source_group.setChecked(False)
+        sg = QFormLayout(self.source_group)
+        sg.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        self.spin_growth_start_iter = QSpinBox()
+        self.spin_growth_start_iter.setRange(0, 1_000_000)
+        self.lbl_growth_start_iter = QLabel()
+        sg.addRow(self.lbl_growth_start_iter, self.spin_growth_start_iter)
+        self.spin_split_at_screen_size = QDoubleSpinBox()
+        self.spin_split_at_screen_size.setRange(0.0, 1.0)
+        self.spin_split_at_screen_size.setDecimals(2)
+        self.spin_split_at_screen_size.setSingleStep(0.05)
+        self.spin_split_at_screen_size.setValue(0.5)
+        self.lbl_split_at_screen_size = QLabel()
+        sg.addRow(self.lbl_split_at_screen_size, self.spin_split_at_screen_size)
+        self.combo_alpha_mode = QComboBox()
+        self.combo_alpha_mode.addItem("", None)  # Brush decides
+        self.combo_alpha_mode.addItem("masked", "masked")
+        self.combo_alpha_mode.addItem("transparent", "transparent")
+        self.lbl_alpha_mode = QLabel()
+        sg.addRow(self.lbl_alpha_mode, self.combo_alpha_mode)
+        self.check_invert_masks = QCheckBox()
+        sg.addRow(self.check_invert_masks)
+        self.spin_units_per_meter = QDoubleSpinBox()
+        self.spin_units_per_meter.setRange(0.0001, 100_000.0)
+        self.spin_units_per_meter.setDecimals(4)
+        self.spin_units_per_meter.setValue(1.0)
+        self.lbl_units_per_meter = QLabel()
+        sg.addRow(self.lbl_units_per_meter, self.spin_units_per_meter)
+        self.spin_opac_decay = QDoubleSpinBox()
+        self.spin_opac_decay.setRange(0.0, 1.0)
+        self.spin_opac_decay.setDecimals(4)
+        self.spin_opac_decay.setSingleStep(0.001)
+        self.spin_opac_decay.setValue(0.004)
+        self.lbl_opac_decay = QLabel()
+        sg.addRow(self.lbl_opac_decay, self.spin_opac_decay)
+        self.spin_min_scale_factor = QDoubleSpinBox()
+        self.spin_min_scale_factor.setRange(0.0, 10.0)
+        self.spin_min_scale_factor.setDecimals(3)
+        self.spin_min_scale_factor.setSingleStep(0.05)
+        self.spin_min_scale_factor.setValue(0.1)
+        self.lbl_min_scale_factor = QLabel()
+        sg.addRow(self.lbl_min_scale_factor, self.spin_min_scale_factor)
+        self.spin_bg_noise = QDoubleSpinBox()
+        self.spin_bg_noise.setRange(0.0, 1.0)
+        self.spin_bg_noise.setDecimals(2)
+        self.spin_bg_noise.setSingleStep(0.05)
+        self.spin_bg_noise.setValue(0.1)
+        self.lbl_bg_noise = QLabel()
+        sg.addRow(self.lbl_bg_noise, self.spin_bg_noise)
+        self.spin_lod_levels = QSpinBox()
+        self.spin_lod_levels.setRange(0, 10)
+        self.lbl_lod_levels = QLabel()
+        sg.addRow(self.lbl_lod_levels, self.spin_lod_levels)
+        self.spin_lod_refine_steps = QSpinBox()
+        self.spin_lod_refine_steps.setRange(0, 1_000_000)
+        self.spin_lod_refine_steps.setValue(5000)
+        self.lbl_lod_refine_steps = QLabel()
+        sg.addRow(self.lbl_lod_refine_steps, self.spin_lod_refine_steps)
+        self.spin_lod_decimation_keep = QSpinBox()
+        self.spin_lod_decimation_keep.setRange(1, 100)
+        self.spin_lod_decimation_keep.setValue(50)
+        self.lbl_lod_decimation_keep = QLabel()
+        sg.addRow(self.lbl_lod_decimation_keep, self.spin_lod_decimation_keep)
+        self.spin_lod_image_scale = QSpinBox()
+        self.spin_lod_image_scale.setRange(1, 100)
+        self.spin_lod_image_scale.setValue(50)
+        self.lbl_lod_image_scale = QLabel()
+        sg.addRow(self.lbl_lod_image_scale, self.spin_lod_image_scale)
+        layout.addWidget(self.source_group)
+        self.combo_build_mode.currentIndexChanged.connect(self._sync_build_mode_groups)
 
-            self.btn_cancel = CancelButton()
-            outer.addWidget(self.btn_cancel)
-        return w
+    def _sync_build_mode_groups(self, *_):
+        """Show the option group of the selected build mode, hide the other."""
+        release = self.combo_build_mode.currentData() == "release"
+        self.release_group.setVisible(release)
+        self.source_group.setVisible(not release)
 
     def _build_right(self):
         return QWidget()
@@ -346,6 +503,18 @@ class EntrainementPanel:
     def _on_advanced_toggled(self, checked):
         self.advanced_group.setVisible(checked)
 
+    def _sync_args_tooltip(self, *_):
+        """Tooltip of the extra-args field: the flags the current build mode accepts."""
+        mode = self.combo_build_mode.currentData()
+        flags = sorted(BrushEngine.allowed_flags(mode))
+        # Four flags per line keeps the tooltip readable.
+        rows = [", ".join(flags[i:i + 4]) for i in range(0, len(flags), 4)]
+        # No default passed to tr(): with the key present, extra arguments feed
+        # .format() (cf. _delete_selected_preset). Key exists in all 9 locales.
+        self.custom_args_edit.setToolTip(
+            tr("brush_args_tooltip").format(self.combo_build_mode.currentText(), "\n".join(rows))
+        )
+
     def _browse_dataset(self):
         path = get_existing_directory(self.center, tr("brush_lbl_input", "Dossier dataset"))
         if path:
@@ -382,9 +551,47 @@ class EntrainementPanel:
             growth_select_fraction=self.spin_fraction.value() if densif_on else None,
             growth_stop_iter=(self.spin_growth_stop.value() or None) if densif_on else None,
             checkpoint_interval=self.spin_checkpoint_interval.value() if ckpt_on else 7000,
+            eval_every=(self.spin_eval_every.value() or None) if ckpt_on else None,
             build_mode=self.combo_build_mode.currentData(),
             refine_mode=self.combo_mode.currentData() == "refine",
+            **self._mode_specific_params(),
         )
+
+    @staticmethod
+    def _float_or_none(text):
+        try:
+            return float(text.strip()) if text.strip() else None
+        except ValueError:
+            return None
+
+    def _mode_specific_params(self):
+        """Fields of the release/source groups: set only when the group is
+        checked *and* matches the selected build mode, None otherwise."""
+        mode = self.combo_build_mode.currentData()
+        out = {}
+        if mode == "release" and self.release_group.isChecked():
+            out.update(
+                lr_scale_end=self.spin_lr_scale_end.value(),
+                opac_loss_weight=self._float_or_none(self.edit_opac_loss_weight.text()),
+                scale_loss_weight=self._float_or_none(self.edit_scale_loss_weight.text()),
+                aux_loss_time=self.spin_aux_loss_time.value(),
+            )
+        elif mode != "release" and self.source_group.isChecked():
+            out.update(
+                growth_start_iter=self.spin_growth_start_iter.value(),
+                split_at_screen_size=self.spin_split_at_screen_size.value(),
+                alpha_mode=self.combo_alpha_mode.currentData(),
+                invert_masks=self.check_invert_masks.isChecked(),
+                units_per_meter=self.spin_units_per_meter.value(),
+                opac_decay=self.spin_opac_decay.value(),
+                min_scale_factor=self.spin_min_scale_factor.value(),
+                background_noise_strength=self.spin_bg_noise.value(),
+                lod_levels=self.spin_lod_levels.value(),
+                lod_refine_steps=self.spin_lod_refine_steps.value(),
+                lod_decimation_keep=self.spin_lod_decimation_keep.value(),
+                lod_image_scale=self.spin_lod_image_scale.value(),
+            )
+        return out
 
     def set_params(self, params: BrushParams):
         if params.total_steps is not None:
@@ -411,6 +618,8 @@ class EntrainementPanel:
             self.spin_growth_stop.setValue(params.growth_stop_iter)
         if params.checkpoint_interval is not None:
             self.spin_checkpoint_interval.setValue(params.checkpoint_interval)
+        # Older presets stored eval_every as a string; int() keeps them working.
+        self.spin_eval_every.setValue(int(params.eval_every or 0))
         if params.build_mode:
             idx = self.combo_build_mode.findData(params.build_mode)
             if idx >= 0:
@@ -419,6 +628,41 @@ class EntrainementPanel:
         idx = self.combo_mode.findData("refine" if params.refine_mode else "new")
         if idx >= 0:
             self.combo_mode.setCurrentIndex(idx)
+        self._set_mode_specific_params(params)
+
+    def _set_mode_specific_params(self, params: BrushParams):
+        """Restore the release/source groups; a group whose values are present
+        is ticked so a loaded preset actually sends them."""
+        release_fields = (
+            ("lr_scale_end", self.spin_lr_scale_end.setValue),
+            ("opac_loss_weight", lambda v: self.edit_opac_loss_weight.setText(repr(v))),
+            ("scale_loss_weight", lambda v: self.edit_scale_loss_weight.setText(repr(v))),
+            ("aux_loss_time", self.spin_aux_loss_time.setValue),
+        )
+        source_fields = (
+            ("growth_start_iter", self.spin_growth_start_iter.setValue),
+            ("split_at_screen_size", self.spin_split_at_screen_size.setValue),
+            ("alpha_mode", lambda v: self.combo_alpha_mode.setCurrentIndex(
+                max(0, self.combo_alpha_mode.findData(v)))),
+            ("invert_masks", lambda v: self.check_invert_masks.setChecked(bool(v))),
+            ("units_per_meter", self.spin_units_per_meter.setValue),
+            ("opac_decay", self.spin_opac_decay.setValue),
+            ("min_scale_factor", self.spin_min_scale_factor.setValue),
+            ("background_noise_strength", self.spin_bg_noise.setValue),
+            ("lod_levels", self.spin_lod_levels.setValue),
+            ("lod_refine_steps", self.spin_lod_refine_steps.setValue),
+            ("lod_decimation_keep", self.spin_lod_decimation_keep.setValue),
+            ("lod_image_scale", self.spin_lod_image_scale.setValue),
+        )
+        for group, fields in ((self.release_group, release_fields), (self.source_group, source_fields)):
+            present = False
+            for name, setter in fields:
+                value = getattr(params, name)
+                if value is not None:
+                    setter(value)
+                    present = True
+            if present:
+                group.setChecked(True)
 
     def get_state(self):
         # ply_name_edit has no matching BrushParams field (engine-agnostic,
@@ -460,6 +704,7 @@ class EntrainementPanel:
         self.lbl_build_mode.setText(tr("settings_build_mode", "Mode de build Brush"))
         for i, (_value, key, default) in enumerate(_BUILD_MODES):
             self.combo_build_mode.setItemText(i, tr(key, default))
+        self._sync_args_tooltip()
         self.densif_group.setTitle(tr("brush_group_densif", "Densification"))
         self.lbl_start_iter.setText(tr("brush_start_iter", "Start iter"))
         self.lbl_refine.setText(tr("brush_refine_every", "Refine every"))
@@ -468,6 +713,26 @@ class EntrainementPanel:
         self.lbl_growth_stop.setText(tr("brush_growth_stop", "Growth stop iter"))
         self.ckpt_group.setTitle(tr("brush_group_ckpt", "Checkpoints"))
         self.lbl_ckpt_interval.setText(tr("brush_ckpt_interval", "Checkpoint interval"))
+        self.lbl_eval_every.setText(tr("brush_eval_every", "Éval. toutes les N étapes (0 = jamais)"))
+        self.release_group.setTitle(tr("brush_group_release", "Options release (0.3.0)"))
+        self.lbl_lr_scale_end.setText(tr("brush_lr_scale_end", "LR échelle (fin)"))
+        self.lbl_opac_loss_weight.setText(tr("brush_opac_loss_weight", "Poids perte opacité"))
+        self.lbl_scale_loss_weight.setText(tr("brush_scale_loss_weight", "Poids perte échelle"))
+        self.lbl_aux_loss_time.setText(tr("brush_aux_loss_time", "Durée pertes aux. (0–1)"))
+        self.source_group.setTitle(tr("brush_group_source", "Options build git"))
+        self.lbl_growth_start_iter.setText(tr("brush_growth_start_iter", "Growth start iter"))
+        self.lbl_split_at_screen_size.setText(tr("brush_split_at_screen_size", "Split à la taille écran (0 = off)"))
+        self.lbl_alpha_mode.setText(tr("brush_alpha_mode", "Mode alpha"))
+        self.combo_alpha_mode.setItemText(0, tr("brush_alpha_auto", "Auto"))
+        self.check_invert_masks.setText(tr("brush_invert_masks", "Inverser les masques"))
+        self.lbl_units_per_meter.setText(tr("brush_units_per_meter", "Unités par mètre"))
+        self.lbl_opac_decay.setText(tr("brush_opac_decay", "Décroissance opacité"))
+        self.lbl_min_scale_factor.setText(tr("brush_min_scale_factor", "Filtre 3D min (Mip-Splatting)"))
+        self.lbl_bg_noise.setText(tr("brush_bg_noise", "Bruit du fond"))
+        self.lbl_lod_levels.setText(tr("brush_lod_levels", "Niveaux LOD (0 = off)"))
+        self.lbl_lod_refine_steps.setText(tr("brush_lod_refine_steps", "Étapes par niveau LOD"))
+        self.lbl_lod_decimation_keep.setText(tr("brush_lod_decimation_keep", "LOD : % de splats gardés"))
+        self.lbl_lod_image_scale.setText(tr("brush_lod_image_scale", "LOD : % d'échelle image"))
         self.lbl_mode.setText(tr("brush_lbl_mode", "Mode"))
         self.combo_mode.setItemText(0, tr("brush_mode_new", "Nouveau"))
         self.combo_mode.setItemText(1, tr("brush_mode_refine", "Refine"))

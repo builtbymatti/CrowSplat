@@ -16,7 +16,7 @@ are in place.
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -70,6 +70,37 @@ _SOURCE_TYPES = (
 )
 
 
+# Folder scans still running: a QThread must outlive its run(), so finished
+# workers are only dropped from here once they report back.
+_SCAN_WORKERS = set()
+
+
+def _is_dir(raw) -> bool:
+    """``Path(raw).is_dir()`` that never raises (bad input reads as False)."""
+    try:
+        return Path(raw).is_dir()
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+class _SourceScanWorker(QThread):
+    """Run detect_source_kind() on a folder off the GUI thread.
+
+    Emits ``done(request_id, kind)``; the panel drops results older than its
+    latest request (the user kept typing while the scan was running).
+    """
+
+    done = Signal(int, str)
+
+    def __init__(self, request_id, path):
+        super().__init__()
+        self._request_id = request_id
+        self._path = path
+
+    def run(self):
+        self.done.emit(self._request_id, detect_source_kind(self._path))
+
+
 class SourcePanel:
     """Plain panel exposing ``center`` and ``right`` (Qt widgets)."""
 
@@ -79,6 +110,9 @@ class SourcePanel:
         self._bindings = []
         self._video_trim = None
         self._trim_source = None
+        # Latest source-type request id and its resolved "is video" answer.
+        self._scan_req = 0
+        self._is_video = False
         self.center = self._build_center()
         self.right = self._build_right()
         add_language_observer(self.retranslate_ui)
@@ -405,14 +439,33 @@ class SourcePanel:
     def _evaluate_source_type(self):
         """Re-derive FPS field visibility and the mixed-content banner from the
         current Input field + Source type selection."""
+        self._scan_req += 1
         forced = self.combo_source_type.currentData()
         if forced in ("images", "video"):
-            is_video = forced == "video"
-            is_mixed = False
-        else:
-            kind = detect_source_kind(self.input_path.text())
-            is_video = kind == "video"
-            is_mixed = kind == "mixed"
+            self._apply_source_kind(forced == "video", False)
+            return
+        raw = self.input_path.text()
+        if raw and _is_dir(raw):
+            # Listing a large folder on a NAS/USB drive can take seconds: scan
+            # in the background, but refresh the trim button right away since
+            # it only depends on the path itself.
+            self._update_video_range_button(self._is_video)
+            worker = _SourceScanWorker(self._scan_req, raw)
+            worker.done.connect(self._on_scan_done)
+            _SCAN_WORKERS.add(worker)
+            worker.finished.connect(lambda w=worker: _SCAN_WORKERS.discard(w))
+            worker.start()
+            return
+        kind = detect_source_kind(raw)
+        self._apply_source_kind(kind == "video", kind == "mixed")
+
+    def _on_scan_done(self, request_id, kind):
+        if request_id != self._scan_req:
+            return  # stale: the Input field or Source type changed meanwhile
+        self._apply_source_kind(kind == "video", kind == "mixed")
+
+    def _apply_source_kind(self, is_video, is_mixed):
+        self._is_video = is_video
         self.fps_spin.setVisible(is_video)
         self.lbl_fps.setVisible(is_video)
         self.lbl_err_mixed.setVisible(is_mixed)

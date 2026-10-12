@@ -605,16 +605,19 @@ class SharpVideoWorker(BaseWorker):
 class CleanerWorker(BaseWorker):
     """Thread worker for cleaning one or more .ply (Gaussian Splat) files."""
 
-    def __init__(self, input_path, output_path, params, recursive=False):
+    def __init__(self, input_path, output_path, params, recursive=False, clean_fn=None):
         super().__init__()
         self.input_path = Path(input_path)
         self.output_path = Path(output_path)
         self.params = params
         self.recursive = recursive
+        # Injectable cleaning function (defaults to ply_cleaner.clean_ply).
+        self.clean_fn = clean_fn
 
     def run(self):
         try:
             self.log_signal.emit(tr("clean_start", "--- Starting PLY cleaning ---"))
+            clean = self.clean_fn or clean_ply
 
             if self.input_path.is_dir():
                 # Folder mode
@@ -644,7 +647,7 @@ class CleanerWorker(BaseWorker):
 
                     self.log_signal.emit(tr("clean_progress_item", "[{idx}/{total}] Cleaning {name}...").format(idx=idx, total=total, name=ply_path.name))
                     try:
-                        stats = clean_ply(
+                        stats = clean(
                             ply_path, out_path,
                             log=self.log_signal.emit,
                             overrides=self.params,
@@ -675,7 +678,7 @@ class CleanerWorker(BaseWorker):
                 # Single-file mode (existing behavior)
                 self.log_signal.emit(tr("clean_single", "Cleaning {path}...").format(path=self.input_path))
                 try:
-                    stats = clean_ply(
+                    stats = clean(
                         self.input_path, self.output_path,
                         log=self.log_signal.emit,
                         overrides=self.params,
@@ -804,12 +807,13 @@ class ExportWorker(BaseWorker):
     UI freezes on large batches.
     """
 
-    def __init__(self, input_paths, output_dir, output_format, options=None):
+    def __init__(self, input_paths, output_dir, output_format, options=None, engine=None):
         super().__init__()
         self.input_paths = list(input_paths)
         self.output_dir = Path(output_dir)
         self.output_format = output_format
         self.options = options or {}
+        self.engine = engine
 
     def run(self):
         from app.core.export_engine import ExportEngine
@@ -822,7 +826,7 @@ class ExportWorker(BaseWorker):
         self.log_signal.emit(tr("export_start", "--- Starting export ({fmt}) ---").format(fmt=self.output_format.upper()))
         self.log_signal.emit(tr("export_count", "{total} file(s) to process. Output: {dir}").format(total=total, dir=self.output_dir))
 
-        engine = ExportEngine(logger_callback=self.log_signal.emit)
+        engine = self.engine or ExportEngine(logger_callback=self.log_signal.emit)
         success_count = 0
         cancelled = False
 

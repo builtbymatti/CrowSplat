@@ -15,6 +15,8 @@ and finishes the translation of engine and CLI messages.
 - **`LOG_LEVEL` environment variable** to set the log verbosity.
 
 ### 🔄 Changed
+- **Unverified upscale models are flagged.** A model file already on disk with no declared checksum is still used, but the log now says it was not verified.
+- Export and Cleaning background tasks accept an injected engine, like the other tasks (easier to test).
 - **Startup update check asks before updating.** An engine with a newer version and auto-update disabled was updated silently; it now reports the new version and asks (no answer means no).
 - **Full translation of engine and CLI messages.** COLMAP, Brush, Sharp, 4DGS, 360 extraction, Upscale, Export and every CLI subcommand now speak the selected language (about 230 new keys across the 9 locales).
 - **Arabic (right-to-left) layout**: the side rail now mirrors its alignment, borders and indentation.
@@ -24,6 +26,7 @@ and finishes the translation of engine and CLI messages.
 
 ### ⚡ Performance
 - **No more interface freezes** while SuperSplat starts, while a video's range is probed or extracted, or while dependencies are set up before a restart: all run in the background.
+- **Choosing a source folder no longer freezes the window**: the folder is scanned in the background (large folders on a NAS or USB drive used to hitch).
 - Upscale model downloads are streamed instead of loaded in memory.
 
 ### 🐛 Fixed

@@ -96,6 +96,8 @@ def detect_source_kind(path) -> Literal["images", "video", "mixed", "empty"]:
                 has_image = True
             elif suffix in _VIDEO_EXTS:
                 has_video = True
+            if has_image and has_video:
+                break  # "mixed" is already certain
     except OSError:
         return "empty"
 

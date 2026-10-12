@@ -2,6 +2,8 @@
 
 **CorbeauSplat** is an all-in-one Gaussian Splatting automation tool designed specifically for **macOS Silicon**. It streamlines the entire workflow from raw video/images to a fully trained and viewable 3D scene (Gaussian Splat).
 
+**Current version: 2.1.0** — see the [CHANGELOG](CHANGELOG.md) for what changed.
+
 <div align="center">
 
 [![Buy Me A Coffee](https://www.buymeacoffee.com/assets/img/custom_images/yellow_img.png)](https://www.buymeacoffee.com/freddewitt)
@@ -14,10 +16,10 @@
 
 This application provides a unified Graphical User Interface (GUI) to orchestrate the following steps:
 1.  **Project Management**: Automatically organizes your outputs into structured project folders with images, sparse data, and checkpoints. Settings can be saved as **named configurations** (load / save / delete) and reused from one project to the next.
-2.  **Source Preparation**: Point the app at a video or a folder of images — the type is detected automatically (mixed folders are flagged). For a single video, **pick an in/out range** with an ffmpeg-based preview before extraction. Formats COLMAP cannot read (HEIC, TIFF, BMP, WebP…) are converted to PNG or JPEG for you, or left untouched if you prefer.
+2.  **Source Preparation**: Point the app at a video or a folder of images — the type is detected automatically (mixed folders are flagged). Folders are scanned in the background, so large folders on a NAS or USB drive no longer freeze the window. For a single video, **pick an in/out range** with an ffmpeg-based preview before extraction. Formats COLMAP cannot read (HEIC, TIFF, BMP, WebP…) are converted to PNG or JPEG for you, or left untouched if you prefer.
 3.  **Sparse Reconstruction**: Automates **COLMAP** feature extraction, matching, and mapping. Supports **Glomap** as a modern alternative mapper.
 4.  **Undistortion**: Automatically undistorts images for optimal training quality.
-5.  **AI Upscaling**: Optionally enhances input images before reconstruction using **upscayl-ncnn** — a fast NCNN-based upscaler with 6 curated models (Real-ESRGAN x4+, 4xLSDIR, 4xNomos8kSC, and more), browsable in a **model gallery** where each one can be downloaded or deleted. Downloads are verified against pinned checksums.
+5.  **AI Upscaling**: Optionally enhances input images before reconstruction using **upscayl-ncnn** — a fast NCNN-based upscaler with 6 curated models (Real-ESRGAN x4+, 4xLSDIR, 4xNomos8kSC, and more), browsable in a **model gallery** where each one can be downloaded or deleted. Downloads are verified against pinned checksums; a model already on disk that cannot be verified is flagged in the log.
 6.  **Training**: Integrates **Brush** to train Gaussian Splats directly on your Mac, with a coarse progress indicator based on the checkpoints written to disk. Choose where checkpoints go, and optionally keep only the latest.
 7.  **Cleaning**: Standalone **Nettoyage** tab to remove artifacts from any `.ply` file — transparent splats, oversized splats, spatial outliers — in single-file or batch mode. Three presets: Light / Medium / Strong.
 8.  **Format Conversion**: **SplatTransform** tab powered by [PlayCanvas `@playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) v3.10.0. Converts between PLY, SPZ, SOG, GLB, and CSV. Supports SH band reduction, point count decimation, NaN filtering, isolated-splat ("floaters") removal, and Morton spatial reordering.
@@ -67,7 +69,7 @@ It also includes built-in full localization support for **French, English, Germa
     ```bash
     ./"CorbeauSplat.command"
     ```
-    *The script will automatically detect missing dependencies (Python packages, Brush, SuperSplat, Rust, Node.js, etc.) and attempt to install them for you.*
+    *The script will automatically detect missing dependencies (Python packages, Brush, SuperSplat, Rust, Node.js, etc.) and attempt to install them for you. Python packages are installed at the exact versions listed in `requirements.lock` (falling back to the ranges in `requirements.txt` if the lockfile is absent).*
 
 ## 📖 How to Use
 

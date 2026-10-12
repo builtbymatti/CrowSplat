@@ -427,10 +427,10 @@ def download_model_files(url_bin: str, url_param: str,
                         log(f"  ⚠️ {dest.name} checksum mismatch, re-downloading...")
                         dest.unlink()
                 else:
-                    log(f"  Already present: {dest.name}")
+                    log(f"  ⚠️ {dest.name}: already present but not verified (no SHA256 declared)")
                     continue
             else:
-                log(f"  Already present: {dest.name}")
+                log(f"  ⚠️ {dest.name}: already present but not verified (model not in catalogue)")
                 continue
         try:
             log(f"Downloading {model_id}{ext}...")

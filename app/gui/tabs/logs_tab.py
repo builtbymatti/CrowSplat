@@ -34,16 +34,16 @@ class LogsTab(QWidget):
         search_layout.setContentsMargins(0, 0, 0, 0)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search logs...")
+        self.search_input.setPlaceholderText(tr("logs_search_placeholder", "Search logs..."))
         search_layout.addWidget(self.search_input)
 
         self.btn_find_next = QPushButton("▼")
-        self.btn_find_next.setToolTip("Find next")
-        self.btn_find_next.clicked.connect(self._find_next)
+        self.btn_find_next.setToolTip(tr("logs_find_next", "Find next"))
+        self.btn_find_next.clicked.connect(self.find_next)
         search_layout.addWidget(self.btn_find_next)
 
         self.btn_find_prev = QPushButton("▲")
-        self.btn_find_prev.setToolTip("Find previous")
+        self.btn_find_prev.setToolTip(tr("logs_find_prev", "Find previous"))
         self.btn_find_prev.clicked.connect(self._find_prev)
         search_layout.addWidget(self.btn_find_prev)
 
@@ -84,7 +84,8 @@ class LogsTab(QWidget):
 
         layout.addLayout(btn_layout)
 
-    def _find_next(self):
+    def find_next(self):
+        """Select the next occurrence of the search text."""
         text = self.search_input.text()
         if text:
             self.log_text.find(text)
@@ -122,12 +123,12 @@ class LogsTab(QWidget):
         """Save the logs"""
         filename, _ = get_save_file_name(
             self, tr("btn_save_log"),
-            "", "Fichier texte (*.txt);;Tous (*.*)"
+            "", tr("filter_text_files", "Text file (*.txt)") + ";;" + tr("filter_all", "All files (*.*)")
         )
 
         if filename:
             try:
-                with open(filename, 'w') as f:
+                with open(filename, 'w', encoding='utf-8') as f:
                     f.write(self.log_text.toPlainText())
                 QMessageBox.information(self, tr("msg_success"), tr("logs_saved", "Logs sauvegardés !"))
             except OSError as e:

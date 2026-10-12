@@ -55,7 +55,7 @@ class SuperSplatEngineDep(EngineDependency):
         )
         if result.returncode != 0:
             return False
-        return Path(result.stdout.strip()) == self.target_dir
+        return Path(result.stdout.strip()).resolve() == self.target_dir.resolve()
 
     def _npm_install(self):
         target = str(self.target_dir)

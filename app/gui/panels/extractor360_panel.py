@@ -27,6 +27,8 @@ from app.gui.widgets.drop_line_edit import DropLineEdit
 
 
 class Extractor360Panel:
+    """360 extractor options panel (OPTIONS › 360): equirectangular video to perspective frames."""
+
     def __init__(self, run_state):
         self.run_state = run_state
         self.center = self._build_center()

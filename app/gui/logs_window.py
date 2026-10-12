@@ -52,7 +52,7 @@ class LogsWindow(QDialog):
         self.activateWindow()
         if search:
             self.logs.search_input.setText(search)
-            self.logs._find_next()
+            self.logs.find_next()
 
     def retranslate_ui(self):
         self.setWindowTitle(tr("logbar_title", "Logs"))

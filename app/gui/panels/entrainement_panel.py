@@ -45,7 +45,7 @@ from app.core.brush_presets import (
     save_user_preset,
 )
 from app.core.i18n import add_language_observer, tr
-from app.core.system import available_devices, get_brush_build_mode
+from app.core.system import available_devices, get_brush_build_mode, resolve_project_root
 from app.gui.run_state_binding import bind_flag_checkbox
 from app.gui.widgets.cancel_button import CancelButton
 from app.gui.widgets.dialog_utils import get_existing_directory
@@ -236,9 +236,14 @@ class EntrainementPanel:
         self.combo_build_mode = QComboBox()
         for value, key, default in _BUILD_MODES:
             self.combo_build_mode.addItem(tr(key, default), value)
-        idx = self.combo_build_mode.findData(get_brush_build_mode())
-        if idx >= 0:
-            self.combo_build_mode.setCurrentIndex(idx)
+        # Detection may spawn 'brush --help' (up to 10 s) when brush.version is
+        # missing: in that case resolve lazily, the first time the params are needed.
+        self._build_mode_pending = not (resolve_project_root() / "engines" / "brush.version").exists()
+        if not self._build_mode_pending:
+            idx = self.combo_build_mode.findData(get_brush_build_mode())
+            if idx >= 0:
+                self.combo_build_mode.setCurrentIndex(idx)
+        self.combo_build_mode.activated.connect(self._mark_build_mode_chosen)
         # The release and a source build accept different extra options; the
         # tooltip on the extra-args field lists the ones the chosen mode takes.
         self.combo_build_mode.currentIndexChanged.connect(self._sync_args_tooltip)
@@ -498,6 +503,13 @@ class EntrainementPanel:
         name, ok = QInputDialog.getText(self.center, tr("brush_save_preset", "Enregistrer le preset"),
                                         tr("brush_preset_name", "Nom du preset"))
         if ok and name.strip():
+            if name.strip() in merge_presets(BRUSH_PRESETS):
+                answer = QMessageBox.question(
+                    self.center, tr("brush_save_preset", "Enregistrer le preset"),
+                    tr("brush_preset_overwrite", "Preset '{name}' already exists. Overwrite it?")
+                    .format(name=name.strip()))
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
             data = self.get_params().to_dict()
             data["ply_name"] = self.ply_name_edit.text().strip()
             try:
@@ -513,6 +525,19 @@ class EntrainementPanel:
     # ── Handlers ────────────────────────────────────────────────────────────────
     def _on_advanced_toggled(self, checked):
         self.advanced_group.setVisible(checked)
+
+    def _mark_build_mode_chosen(self, *_):
+        """The user picked a mode explicitly: no auto-detection needed anymore."""
+        self._build_mode_pending = False
+
+    def _resolve_build_mode(self):
+        """Run the (possibly slow) build-mode detection once, on first need."""
+        if not getattr(self, "_build_mode_pending", False):
+            return
+        self._build_mode_pending = False
+        idx = self.combo_build_mode.findData(get_brush_build_mode())
+        if idx >= 0:
+            self.combo_build_mode.setCurrentIndex(idx)
 
     def _sync_args_tooltip(self, *_):
         """Tooltip of the extra-args field: the flags the current build mode accepts."""
@@ -538,6 +563,7 @@ class EntrainementPanel:
 
     # ── Params ────────────────────────────────────────────────────────────────────
     def get_params(self):
+        self._resolve_build_mode()
         # Densification/Checkpoints are checkable QGroupBox: Qt only greys out
         # their children when unchecked, it does not exclude them from
         # get_params(). Gate explicitly on isChecked() (audit D16/L3-06) so an
@@ -632,6 +658,7 @@ class EntrainementPanel:
         # Older presets stored eval_every as a string; int() keeps them working.
         self.spin_eval_every.setValue(int(params.eval_every or 0))
         if params.build_mode:
+            self._build_mode_pending = False
             idx = self.combo_build_mode.findData(params.build_mode)
             if idx >= 0:
                 self.combo_build_mode.setCurrentIndex(idx)

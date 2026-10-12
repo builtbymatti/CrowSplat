@@ -1,11 +1,12 @@
 """Utility functions for dependency management — installers, checkers, helpers."""
-import json
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from app.core.atomic_io import read_json_dict
+from app.core.system import resolve_project_root
 from app.scripts.checksum_verifier import load_expected_checksums, verify_download_strict
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -13,14 +14,8 @@ from app.scripts.checksum_verifier import load_expected_checksums, verify_downlo
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_config():
-    """Loads config.json from project root/cwd"""
-    p = Path("config.json")
-    if p.exists():
-        try:
-            return json.loads(p.read_text())
-        except (OSError, json.JSONDecodeError) as e:
-            print(f"Warning: Failed to load config.json: {e}")
-    return {}
+    """Loads config.json from the project root (not the CWD)."""
+    return read_json_dict(resolve_project_root() / "config.json")
 
 
 def relax_requirements(src, dst):
@@ -143,6 +138,7 @@ def install_rust_toolchain():
             os.environ["PATH"] = str(cargo_bin) + os.pathsep + os.environ["PATH"]
             print("Rust installed and added to PATH.")
             return True
+        print("Error installing Rust: ~/.cargo/bin not found after rustup finished.")
     except Exception as e:
         print(f"Error installing Rust: {e}")
     finally:

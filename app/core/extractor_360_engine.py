@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 
@@ -10,6 +11,9 @@ from app.scripts.setup_dependencies import (
 
 from .base_engine import BaseEngine
 from .i18n import tr
+from .system import compute_env
+
+logger = logging.getLogger(__name__)
 
 
 class Extractor360Engine(BaseEngine):
@@ -49,11 +53,13 @@ class Extractor360Engine(BaseEngine):
         safe_out = self.validate_path(output_dir) or self.validate_path(str(Path(output_dir).parent))
         if safe_in is None:
             if log_callback:
-                log_callback(f"SECURITY: Invalid input path: {input_path}")
+                log_callback(f"SECURITY: Invalid input path: {os.path.basename(str(input_path))}")
+                logger.debug("Invalid input path: %s", input_path)
             return False
         if safe_out is None:
             if log_callback:
-                log_callback(f"SECURITY: Invalid output directory: {output_dir}")
+                log_callback(f"SECURITY: Invalid output directory: {os.path.basename(str(output_dir))}")
+                logger.debug("Invalid output directory: %s", output_dir)
             return False
 
         cmd = [
@@ -106,7 +112,7 @@ class Extractor360Engine(BaseEngine):
 
         # Run process
         # We use Popen to capture stdout/stderr for progress
-        env = os.environ.copy()
+        env = compute_env()
         # Isolate from the main app's PYTHONPATH to avoid package conflicts
         env.pop("PYTHONPATH", None)
 
@@ -135,6 +141,6 @@ class Extractor360Engine(BaseEngine):
                 log_callback("Processus arrêté par l'utilisateur.")
             return False
 
-        if status_callback:
+        if status_callback and returncode == 0:
             status_callback(tr("status_ready", "Traitement terminé !"))
         return returncode == 0

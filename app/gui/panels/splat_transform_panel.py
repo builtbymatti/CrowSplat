@@ -24,6 +24,8 @@ from app.gui.widgets.drop_line_edit import DropLineEdit
 
 
 class SplatTransformPanel:
+    """SplatTransform panel: convert and filter splat files."""
+
     def __init__(self, run_state):
         self.run_state = run_state
         self._bindings = []
@@ -139,7 +141,7 @@ class SplatTransformPanel:
 
     def _browse_input(self):
         path, _ = get_open_file_name(self.center, tr("btn_browse", "Parcourir"), "",
-                                     "Splats (*.ply *.spz *.sog *.splat);;Tous (*.*)")
+                                     "Splats (*.ply *.spz *.sog *.splat);;" + tr("filter_all", "All files (*.*)"))
         if path:
             self.input_path.setText(path)
 

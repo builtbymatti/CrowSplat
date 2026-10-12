@@ -5,6 +5,38 @@ import argparse
 from app.core.system import available_devices
 
 
+def _bounded_int(lo=None, hi=None):
+    """Build an argparse `type=` callable accepting integers within [lo, hi]."""
+    def parse(raw):
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            raise argparse.ArgumentTypeError(f"entier attendu, reçu '{raw}'") from None
+        if (lo is not None and value < lo) or (hi is not None and value > hi):
+            bounds = f"entre {lo} et {hi}" if None not in (lo, hi) else (
+                f">= {lo}" if lo is not None else f"<= {hi}")
+            raise argparse.ArgumentTypeError(f"valeur {value} invalide : doit être {bounds}")
+        return value
+    return parse
+
+
+def _bounded_float(lo=None, hi=None):
+    """Build an argparse `type=` callable accepting finite floats within [lo, hi]."""
+    def parse(raw):
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise argparse.ArgumentTypeError(f"nombre attendu, reçu '{raw}'") from None
+        if value != value or value in (float("inf"), float("-inf")):
+            raise argparse.ArgumentTypeError(f"valeur '{raw}' invalide : doit être finie")
+        if (lo is not None and value < lo) or (hi is not None and value > hi):
+            bounds = f"entre {lo} et {hi}" if None not in (lo, hi) else (
+                f">= {lo}" if lo is not None else f"<= {hi}")
+            raise argparse.ArgumentTypeError(f"valeur {value} invalide : doit être {bounds}")
+        return value
+    return parse
+
+
 def _add_view_graph_flags(p):
     """Declare the two COLMAP flags that default to on.
 
@@ -77,7 +109,7 @@ def _add_pipeline_parser(subs):
     # COLMAP
     p.add_argument("--type", choices=["images", "video"], default="images",
                    help="Type d'entrée (défaut: images)")
-    p.add_argument("--fps",  type=int, default=5,   help="FPS d'extraction vidéo (défaut: 5)")
+    p.add_argument("--fps",  type=_bounded_int(1, 240), default=5,   help="FPS d'extraction vidéo (défaut: 5)")
     p.add_argument("--camera_model", default="SIMPLE_RADIAL",
                    choices=["SIMPLE_PINHOLE","PINHOLE","SIMPLE_RADIAL","RADIAL","OPENCV","OPENCV_FISHEYE"],
                    help="Modèle de caméra COLMAP (défaut: SIMPLE_RADIAL)")
@@ -90,7 +122,7 @@ def _add_pipeline_parser(subs):
                    help="Algorithme de matching (défaut: auto selon --feature-type). LightGlue = matching neuronal")
     p.add_argument("--matcher_type", choices=["exhaustive","sequential","vocab_tree"], default="exhaustive",
                    help="Stratégie de matching (défaut: exhaustive)")
-    p.add_argument("--max_image_size", type=int, default=3200,
+    p.add_argument("--max_image_size", type=_bounded_int(1), default=3200,
                    help="Résolution max des images pour COLMAP (défaut: 3200)")
     # BooleanOptionalAction, not store_true: kept in sync with the `colmap`
     # subcommand and ColmapParams/GUI, which both default to True (L4-10).
@@ -99,14 +131,14 @@ def _add_pipeline_parser(subs):
     # Brush
     p.add_argument("--preset", choices=["default","fast","std","dense"], default="default",
                    help="Preset d'entraînement Brush (défaut: default)")
-    p.add_argument("--iterations", type=int,   default=None, metavar="N",
+    p.add_argument("--iterations", type=_bounded_int(1),   default=None, metavar="N",
                    help="Nb total d'itérations Brush (remplace le preset)")
     p.add_argument("--sh_degree",  type=int,   default=None, choices=range(1,5),
                    help="Degré Spherical Harmonics 1-4 (défaut: 3)")
     p.add_argument("--device", default="auto",
                    choices=["auto", *available_devices()], help="Device Brush (défaut: auto)")
     p.add_argument("--with_viewer", action="store_true", help="Ouvrir le viewer interactif après entraînement")
-    p.add_argument("--max_resolution", type=int, default=None,
+    p.add_argument("--max_resolution", type=_bounded_int(0), default=None,
                    help="Résolution max entraînement 0=auto (défaut: 0)")
     p.add_argument("--ply_name",    default=None,        help="Nom du fichier PLY de sortie")
     p.add_argument("--filter_blur",  action="store_true", help="Filtrer les images floues avant COLMAP")
@@ -114,13 +146,13 @@ def _add_pipeline_parser(subs):
                    help="Force du filtre flou (défaut: medium)")
     p.add_argument("--robust",       action="store_true", help="Mode robuste pour grandes scènes (anti-crash COLMAP)")
     p.add_argument("--thermal-throttling", action="store_true", help="Activer le throttling thermique")
-    p.add_argument("--sequential_overlap", type=int, default=30,
+    p.add_argument("--sequential_overlap", type=_bounded_int(1), default=30,
                    help="Images voisines comparées par le matcher séquentiel (défaut: 30)")
     p.add_argument("--guided_matching", action="store_true",
                    help="Matching guidé par la géométrie épipolaire (plus lent, plus robuste)")
-    p.add_argument("--trim_start", type=float, default=None, metavar="SECONDES",
+    p.add_argument("--trim_start", type=_bounded_float(0), default=None, metavar="SECONDES",
                    help="Début de la plage vidéo à extraire (défaut: 0)")
-    p.add_argument("--trim_end", type=float, default=None, metavar="SECONDES",
+    p.add_argument("--trim_end", type=_bounded_float(0), default=None, metavar="SECONDES",
                    help="Fin de la plage vidéo à extraire (défaut: fin de la vidéo)")
     _add_view_graph_flags(p)
     # Steps 3 and 4, opt-in: without them `pipeline` stops after the training.
@@ -132,15 +164,14 @@ def _add_pipeline_parser(subs):
     p.add_argument("--export_output", default=None,
                    help="Dossier de destination de l'export (défaut: à côté du splat)")
 
-    # ── colmap ────────────────────────────────────────────────────────────────
 
-
+# ── colmap ────────────────────────────────────────────────────────────────
 def _add_colmap_parser(subs):
     p = subs.add_parser("colmap", help="Pipeline COLMAP (vidéo/images → dataset)")
     p.add_argument("--input",  "-i", required=True, help="Vidéo ou dossier d'images source")
     p.add_argument("--output", "-o", required=True, help="Dossier de sortie")
     p.add_argument("--type", choices=["images", "video"], default="images", help="Type d'entrée (défaut: images)")
-    p.add_argument("--fps",  type=int, default=5,         help="FPS d'extraction vidéo (défaut: 5)")
+    p.add_argument("--fps",  type=_bounded_int(1, 240), default=5,         help="FPS d'extraction vidéo (défaut: 5)")
     p.add_argument("--project_name", default="Untitled",  help="Nom du sous-dossier projet")
     # Options de base
     p.add_argument("--camera_model", default="SIMPLE_RADIAL",
@@ -155,8 +186,8 @@ def _add_colmap_parser(subs):
                    help="Extracteur de features (défaut: SIFT). ALIKED requiert ONNX.")
     p.add_argument("--matching_type", choices=["SIFT_BRUTEFORCE","ALIKED_BRUTEFORCE","SIFT_LIGHTGLUE","ALIKED_LIGHTGLUE"], default=None,
                    help="Algorithme de matching (défaut: auto selon --feature-type)")
-    p.add_argument("--max_image_size",    type=int,   default=3200, help="Résolution max des images (défaut: 3200)")
-    p.add_argument("--max_num_features",  type=int,   default=8192, help="Nb max de features par image (défaut: 8192)")
+    p.add_argument("--max_image_size",    type=_bounded_int(1),   default=3200, help="Résolution max des images (défaut: 3200)")
+    p.add_argument("--max_num_features",  type=_bounded_int(1),   default=8192, help="Nb max de features par image (défaut: 8192)")
     # BooleanOptionalAction, not store_true: without it, omitting the flag
     # silently meant False even though ColmapParams/the GUI default to True
     # (audit L4-10) — same rationale as _add_view_graph_flags() above.
@@ -166,18 +197,18 @@ def _add_colmap_parser(subs):
     # Feature matching
     p.add_argument("--matcher_type", choices=["exhaustive","sequential","vocab_tree"], default="exhaustive",
                    help="Stratégie de matching (défaut: exhaustive)")
-    p.add_argument("--max_ratio",    type=float, default=0.8,  help="Ratio max Lowe (défaut: 0.8)")
-    p.add_argument("--max_distance", type=float, default=0.7,  help="Distance max (défaut: 0.7)")
+    p.add_argument("--max_ratio",    type=_bounded_float(0, 1), default=0.8,  help="Ratio max Lowe (défaut: 0.8)")
+    p.add_argument("--max_distance", type=_bounded_float(0, 1), default=0.7,  help="Distance max (défaut: 0.7)")
     p.add_argument("--no_cross_check", action="store_true", help="Désactiver le cross-check")
     # Mapper
-    p.add_argument("--min_num_matches",   type=int, default=15, help="Nb min de matches (défaut: 15)")
-    p.add_argument("--sequential_overlap", type=int, default=30,
+    p.add_argument("--min_num_matches",   type=_bounded_int(1), default=15, help="Nb min de matches (défaut: 15)")
+    p.add_argument("--sequential_overlap", type=_bounded_int(1), default=30,
                    help="Images voisines comparées par le matcher séquentiel (défaut: 30)")
     p.add_argument("--guided_matching",   action="store_true",
                    help="Matching guidé par la géométrie épipolaire (plus lent, plus robuste)")
-    p.add_argument("--trim_start", type=float, default=None, metavar="SECONDES",
+    p.add_argument("--trim_start", type=_bounded_float(0), default=None, metavar="SECONDES",
                    help="Début de la plage vidéo à extraire (défaut: 0)")
-    p.add_argument("--trim_end", type=float, default=None, metavar="SECONDES",
+    p.add_argument("--trim_end", type=_bounded_float(0), default=None, metavar="SECONDES",
                    help="Fin de la plage vidéo à extraire (défaut: fin de la vidéo)")
     p.add_argument("--no_refine_focal",   action="store_true",  help="Ne pas affiner la focale")
     p.add_argument("--refine_principal",  action="store_true",  help="Affiner le point principal")
@@ -189,16 +220,15 @@ def _add_colmap_parser(subs):
     p.add_argument("--thermal-throttling", action="store_true", help="Activer le throttling thermique")
     _add_view_graph_flags(p)
 
-    # ── brush ─────────────────────────────────────────────────────────────────
 
-
+# ── brush ─────────────────────────────────────────────────────────────────
 def _add_brush_parser(subs):
     p = subs.add_parser("brush", help="Entraînement Gaussian Splat (Brush)")
     p.add_argument("--input",  "-i", required=True, help="Dossier dataset COLMAP")
     p.add_argument("--output", "-o", required=True, help="Dossier de sortie")
     p.add_argument("--preset", choices=["default","fast","std","dense"], default="default",
                    help="Preset de paramètres (défaut: default)")
-    p.add_argument("--iterations", type=int,   default=None, metavar="N",
+    p.add_argument("--iterations", type=_bounded_int(1),   default=None, metavar="N",
                    help="Nb total d'itérations (défaut preset: 30000)")
     p.add_argument("--sh_degree",  type=int,   default=None, choices=range(1,5),
                    help="Degré Spherical Harmonics 1-4 (défaut: 3)")
@@ -209,18 +239,17 @@ def _add_brush_parser(subs):
     p.add_argument("--ply_name",   default=None,      help="Nom du fichier PLY de sortie")
     p.add_argument("--custom_args", default=None,     help="Arguments supplémentaires passés à brush")
     # Advanced parameters (None uses the preset value or the default)
-    p.add_argument("--start_iter",              type=int,   default=None, help="Itération de départ (défaut: 0)")
-    p.add_argument("--refine_every",            type=int,   default=None, help="Densification toutes les N iters (défaut: 200)")
+    p.add_argument("--start_iter",              type=_bounded_int(0),   default=None, help="Itération de départ (défaut: 0)")
+    p.add_argument("--refine_every",            type=_bounded_int(1),   default=None, help="Densification toutes les N iters (défaut: 200)")
     p.add_argument("--growth_grad_threshold",   type=float, default=None, help="Seuil gradient densification (défaut: 0.003)")
     p.add_argument("--growth_select_fraction",  type=float, default=None, help="Fraction sélection densification (défaut: 0.2)")
-    p.add_argument("--growth_stop_iter",        type=int,   default=None, help="Arrêt de la densification (défaut: 15000)")
-    p.add_argument("--max_splats",              type=int,   default=None, help="Nb max de gaussiennes (défaut: 10 000 000)")
-    p.add_argument("--checkpoint_interval",     type=int,   default=None, help="Sauvegarder tous les N iters (défaut: 7000)")
-    p.add_argument("--max_resolution",          type=int,   default=None, help="Résolution max entraînement 0=auto (défaut: 0)")
-
-    # ── sharp ─────────────────────────────────────────────────────────────────
+    p.add_argument("--growth_stop_iter",        type=_bounded_int(1),   default=None, help="Arrêt de la densification (défaut: 15000)")
+    p.add_argument("--max_splats",              type=_bounded_int(1),   default=None, help="Nb max de gaussiennes (défaut: 10 000 000)")
+    p.add_argument("--checkpoint_interval",     type=_bounded_int(1),   default=None, help="Sauvegarder tous les N iters (défaut: 7000)")
+    p.add_argument("--max_resolution",          type=_bounded_int(0),   default=None, help="Résolution max entraînement 0=auto (défaut: 0)")
 
 
+# ── sharp ─────────────────────────────────────────────────────────────────
 def _add_sharp_parser(subs):
     p = subs.add_parser("sharp", help="Single Image/Vidéo → 3D Splat (ML-Sharp)")
     p.add_argument("--input",  "-i", required=True, help="Image, dossier d'images ou vidéo")
@@ -230,7 +259,7 @@ def _add_sharp_parser(subs):
     p.add_argument("--checkpoint", "-c", default=None, help="Chemin vers un checkpoint .pt")
     p.add_argument("--device", default="default",
                    choices=["default", *available_devices()], help="Device (défaut: default)")
-    p.add_argument("--skip_frames", type=int, default=1,
+    p.add_argument("--skip_frames", type=_bounded_int(1), default=1,
                    help="[mode vidéo] Traiter 1 frame sur N (défaut: 1)")
     p.add_argument("--upscale", action="store_true",
                    help="Upscaler les images avant prédiction (requiert upscayl-bin)")
@@ -242,29 +271,27 @@ def _add_sharp_parser(subs):
                    help="Facteur du pré-upscale (défaut: 4)")
     p.add_argument("--upscale_format", choices=["png", "jpg", "webp"], default="png",
                    help="Format de l'image upscalée intermédiaire (défaut: png)")
-    p.add_argument("--upscale_tile", type=int, default=0,
+    p.add_argument("--upscale_tile", type=_bounded_int(0), default=0,
                    help="Taille des tuiles VRAM en px pour le pré-upscale, 0=auto (défaut: 0)")
     p.add_argument("--upscale_tta", action="store_true",
                    help="Activer le Test-Time Augmentation pour le pré-upscale")
-    p.add_argument("--upscale_compression", type=int, default=0,
+    p.add_argument("--upscale_compression", type=_bounded_int(0, 100), default=0,
                    help="Niveau de compression du pré-upscale 0-100 (défaut: 0)")
     p.add_argument("--verbose", action="store_true", help="Afficher la sortie détaillée de Sharp")
 
-    # ── view ──────────────────────────────────────────────────────────────────
 
-
+# ── view ──────────────────────────────────────────────────────────────────
 def _add_view_parser(subs):
     p = subs.add_parser("view", help="Visualiser un .ply dans SuperSplat")
     p.add_argument("--input",     "-i", required=True, help="Fichier .ply ou dossier")
-    p.add_argument("--port",      type=int, default=3000, help="Port SuperSplat (défaut: 3000)")
-    p.add_argument("--data_port", type=int, default=8000, help="Port serveur données (défaut: 8000)")
+    p.add_argument("--port",      type=_bounded_int(1, 65535), default=3000, help="Port SuperSplat (défaut: 3000)")
+    p.add_argument("--data_port", type=_bounded_int(1, 65535), default=8000, help="Port serveur données (défaut: 8000)")
     p.add_argument("--no_ui",     action="store_true", help="Masquer l'interface SuperSplat")
     p.add_argument("--cam_pos",   default=None, metavar="X,Y,Z", help="Position initiale caméra")
     p.add_argument("--cam_rot",   default=None, metavar="X,Y,Z", help="Rotation initiale caméra (degrés)")
 
-    # ── upscale ───────────────────────────────────────────────────────────────
 
-
+# ── upscale ───────────────────────────────────────────────────────────────
 def _add_upscale_parser(subs):
     p = subs.add_parser("upscale", help="Upscale d'images via upscayl-bin (NCNN)")
     p.add_argument("--input",  "-i", required=True, help="Image ou dossier d'images")
@@ -275,15 +302,14 @@ def _add_upscale_parser(subs):
                    help="Facteur d'upscale (défaut: 4)")
     p.add_argument("--format", choices=["png","jpg","webp"], default="png",
                    help="Format de sortie (défaut: png)")
-    p.add_argument("--tile",        type=int, default=0,
+    p.add_argument("--tile",        type=_bounded_int(0), default=0,
                    help="Taille des tuiles VRAM en px, 0=auto (défaut: 0)")
     p.add_argument("--tta",         action="store_true", help="Activer le Test-Time Augmentation")
-    p.add_argument("--compression", type=int, default=0,
+    p.add_argument("--compression", type=_bounded_int(0, 9), default=0,
                    help="Niveau de compression sortie 0-9 (défaut: 0)")
 
-    # ── 4dgs ──────────────────────────────────────────────────────────────────
 
-
+# ── 4dgs ──────────────────────────────────────────────────────────────────
 def _add_4dgs_parser(subs):
     p = subs.add_parser("4dgs", help="Préparation dataset 4D Gaussian Splatting (Nerfstudio)")
     # Not required: --input is ignored in --colmap_only mode (commands.py
@@ -291,13 +317,12 @@ def _add_4dgs_parser(subs):
     p.add_argument("--input",  "-i", default=None,
                    help="Dossier contenant les vidéos multi-caméras (ignoré avec --colmap_only)")
     p.add_argument("--output", "-o", required=True, help="Dossier de sortie")
-    p.add_argument("--fps",    type=int, default=5,  help="FPS d'extraction vidéo (défaut: 5)")
+    p.add_argument("--fps",    type=_bounded_int(1, 240), default=5,  help="FPS d'extraction vidéo (défaut: 5)")
     p.add_argument("--colmap_only", action="store_true",
                    help="Lancer uniquement COLMAP sur un dataset déjà extrait")
 
-    # ── clean ─────────────────────────────────────────────────────────────────
 
-
+# ── clean ─────────────────────────────────────────────────────────────────
 def _add_clean_parser(subs):
     p = subs.add_parser("clean", help="Nettoyer un fichier .ply ou un dossier de .ply Gaussian Splat (supprime le bruit, les floaters)")
     p.add_argument("--input",  "-i", required=True,
@@ -320,9 +345,8 @@ def _add_clean_parser(subs):
     p.add_argument("--export-output", metavar="PATH", default=None,
                    help="Dossier de sortie pour l'export (défaut: même dossier que la sortie clean)")
 
-    # ── splattransform ────────────────────────────────────────────────────────
 
-
+# ── splattransform ────────────────────────────────────────────────────────
 def _add_splattransform_parser(subs):
     p = subs.add_parser(
         "splattransform",
@@ -351,6 +375,7 @@ def _add_splattransform_parser(subs):
     )
     p.add_argument(
         "--filter-harmonics", metavar="0|1|2|3", default=None,
+        type=lambda raw: str(_bounded_int(0, 3)(raw)),
         help="Strip spherical harmonics above the given band (0 = DC only)",
     )
     p.add_argument(
@@ -362,14 +387,13 @@ def _add_splattransform_parser(subs):
         help="Reorder splats using Morton curve for GPU cache efficiency",
     )
 
-    # ── extract360 ────────────────────────────────────────────────────────────
 
-
+# ── extract360 ────────────────────────────────────────────────────────────
 def _add_extract360_parser(subs):
     p = subs.add_parser("extract360", help="Extraction vidéo 360° en multi-caméras COLMAP-ready")
     p.add_argument("--input",  "-i", required=True, help="Fichier vidéo 360°")
     p.add_argument("--output", "-o", required=True, help="Dossier de sortie")
-    p.add_argument("--interval",        type=float, default=1.0,
+    p.add_argument("--interval",        type=_bounded_float(0), default=1.0,
                    help="Intervalle entre frames en secondes (défaut: 1.0)")
     # Values imposed by engines/extractor_360/src/extractor360/main.py
     # (--format choices) — a wider set than Extractor360Panel's combo (jpg/png
@@ -377,11 +401,11 @@ def _add_extract360_parser(subs):
     p.add_argument("--format",          default="jpg", choices=["jpg", "png", "tiff"],
                    help="Format image de sortie (défaut: jpg)")
     # Defaults mirror Extractor360Panel so GUI and CLI produce the same output.
-    p.add_argument("--resolution",      type=int,   default=1920,
+    p.add_argument("--resolution",      type=_bounded_int(1),   default=1920,
                    help="Résolution des images extraites (défaut: 1920)")
-    p.add_argument("--camera_count",    type=int,   default=4,
+    p.add_argument("--camera_count",    type=_bounded_int(1),   default=4,
                    help="Nombre de caméras virtuelles (défaut: 4)")
-    p.add_argument("--quality",         type=int,   default=90,
+    p.add_argument("--quality",         type=_bounded_int(0, 100),   default=90,
                    help="Qualité JPEG 0-100 (défaut: 90)")
     # Values imposed by engines/extractor_360/src/main.py (--layout choices).
     p.add_argument("--layout",          default="ring", choices=["ring", "cube", "fibonacci"],

@@ -31,10 +31,6 @@ from PySide6.QtWidgets import (
 from app.core.i18n import add_language_observer
 from app.gui.styles import DEFAULT_THEME, THEMES, get_saved_theme
 
-# Resolved at import time, as in rail.py: styles.py doesn't broadcast a theme
-# change signal that a live widget could subscribe to.
-_MUTED = THEMES.get(get_saved_theme(), THEMES[DEFAULT_THEME])["muted"]
-
 
 class ActivityBar(QWidget):
     """Current step + detail + progress. Always visible, no action."""
@@ -55,7 +51,8 @@ class ActivityBar(QWidget):
         row.addWidget(self.lbl_step)
 
         self.lbl_detail = QLabel()
-        self.lbl_detail.setStyleSheet(f"color: {_MUTED}; background: transparent;")
+        muted = THEMES.get(get_saved_theme(), THEMES[DEFAULT_THEME])["muted"]
+        self.lbl_detail.setStyleSheet(f"color: {muted}; background: transparent;")
         self.lbl_detail.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )

@@ -4,6 +4,7 @@ import os
 import shutil
 import socket
 import socketserver
+import subprocess
 import threading
 import time
 from collections.abc import Callable
@@ -134,17 +135,25 @@ class SuperSplatEngine(BaseEngine):
                     break
                 time.sleep(_PORT_PROBE_DELAY)
 
-            self.log(f"SuperSplat n'a pas confirmé le bind sur le port {port}.", level=logging.ERROR)
+            self.log(tr("log_supersplat_bind_unconfirmed",
+                        "SuperSplat did not confirm binding port {port}.").format(port=port),
+                     level=logging.ERROR)
             self.stop_supersplat()
             return False, tr("err_supersplat_bind_failed", str(port))
-        except Exception as e:
-            self.log(f"Erreur lors du démarrage de SuperSplat : {e}", level=logging.ERROR)
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
+            self.log(tr("log_supersplat_start_error",
+                        "Error starting SuperSplat: {error}").format(error=e),
+                     level=logging.ERROR)
             return False, str(e)
 
     def stop_supersplat(self) -> None:
         """Terminate the SuperSplat viewer process if it is running."""
+        # Also called before every start: only report a stop when a process ran.
+        was_running = (getattr(self.runner, "_process", None) is not None
+                       and self.runner.poll() is None)
         self.runner.terminate()
-        self.log(tr("msg_supersplat_stopped", "SuperSplat arrêté"))
+        if was_running:
+            self.log(tr("msg_supersplat_stopped", "SuperSplat arrêté"))
 
     # ---------------------------------------------------------------------
     # Data server (CORS‑enabled) management
@@ -165,14 +174,17 @@ class SuperSplatEngine(BaseEngine):
             return False, tr("err_data_dir_missing", "Dossier de données introuvable")
 
         allowed_origin = f"http://localhost:{viewer_port}"
+        # Same viewer reached through the loopback IP: the only other origin
+        # that may read the data. Any other localhost port is refused.
+        allowed_origins = {allowed_origin, f"http://127.0.0.1:{viewer_port}"}
 
         class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
-            """Simple request handler that injects a safe ``Access-Control-Allow-Origin`` header."""
+            """Request handler that injects a safe ``Access-Control-Allow-Origin`` header."""
 
             def end_headers(self):  # pragma: no cover – exercised via runtime
                 origin = self.headers.get('Origin')
-                safe = bool(origin) and urlparse(origin).hostname in ('localhost', '127.0.0.1')
-                self.send_header('Access-Control-Allow-Origin', origin if safe else allowed_origin)
+                self.send_header('Access-Control-Allow-Origin',
+                                 origin if origin in allowed_origins else allowed_origin)
                 # The header varies with the request Origin: without this, a shared
                 # cache could serve one origin's response to another.
                 self.send_header('Vary', 'Origin')
@@ -180,7 +192,7 @@ class SuperSplatEngine(BaseEngine):
                 self.send_header('X-Frame-Options', 'DENY')
                 super().end_headers()
 
-            def send_head(self):  # pragma: no cover – exercised via runtime
+            def send_head(self):
                 # Loopback binding alone does not stop DNS rebinding: a hostile
                 # domain re-resolved to 127.0.0.1 would be same-origin with this
                 # server and could read the served folder. Only answer requests
@@ -189,7 +201,16 @@ class SuperSplatEngine(BaseEngine):
                 if host not in ('localhost', '127.0.0.1'):
                     self.send_error(403)
                     return None
+                # The viewer only ever asks for a file: no directory listing,
+                # and no index.html either.
+                if os.path.isdir(self.translate_path(self.path)):
+                    self.send_error(403, "Directory listing disabled")
+                    return None
                 return super().send_head()
+
+            def list_directory(self, path):
+                self.send_error(403, "Directory listing disabled")
+                return None
 
             def log_message(self, format, *args):  # Suppress noisy default logging
                 return
@@ -205,14 +226,18 @@ class SuperSplatEngine(BaseEngine):
         try:
             self.httpd = _ReuseAddrTCPServer(("127.0.0.1", port), handler)
         except OSError as e:
-            self.log(f"Erreur bind Data Server: {e}", level=logging.ERROR)
+            self.log(tr("log_data_server_bind_error",
+                        "Data server bind error: {error}").format(error=e),
+                     level=logging.ERROR)
             return False, tr("err_data_server_bind", str(e))
 
         def run_server():  # pragma: no cover - runs in a background thread
             try:
                 self.httpd.serve_forever()
-            except Exception as e:
-                self.log(f"Erreur Data Server: {e}", level=logging.ERROR)
+            except (OSError, ValueError) as e:
+                self.log(tr("log_data_server_error",
+                            "Data server error: {error}").format(error=e),
+                         level=logging.ERROR)
 
         self.data_server_thread = threading.Thread(target=run_server, daemon=True)
         self.data_server_thread.start()

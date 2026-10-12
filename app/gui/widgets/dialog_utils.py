@@ -12,23 +12,23 @@ def get_existing_directory(parent, caption, directory=""):
         options=get_dialog_options()
     )
 
-def get_open_file_name(parent, caption, directory="", filter=""):
+def get_open_file_name(parent, caption, directory="", name_filter=""):
     """Wrapper for QFileDialog.getOpenFileName"""
     return QFileDialog.getOpenFileName(
-        parent, caption, directory, filter,
+        parent, caption, directory, name_filter,
         options=get_dialog_options()
     )
 
-def get_open_file_names(parent, caption, directory="", filter=""):
+def get_open_file_names(parent, caption, directory="", name_filter=""):
     """Wrapper for QFileDialog.getOpenFileNames"""
     return QFileDialog.getOpenFileNames(
-        parent, caption, directory, filter,
+        parent, caption, directory, name_filter,
         options=get_dialog_options()
     )
 
-def get_save_file_name(parent, caption, directory="", filter=""):
+def get_save_file_name(parent, caption, directory="", name_filter=""):
     """Wrapper for QFileDialog.getSaveFileName"""
     return QFileDialog.getSaveFileName(
-        parent, caption, directory, filter,
+        parent, caption, directory, name_filter,
         options=get_dialog_options()
     )

@@ -29,6 +29,6 @@ class FourDGSEngineDep(PipEngine):
         self.create_venv()
         req_file = self.target_dir / "requirements.txt"
         if req_file.exists():
-            self.pip_install(["-r", str(req_file)])
+            self.pip_install(["-r", str(req_file)], cwd=str(self.target_dir))
         self.pip_install(["-e", "."], cwd=str(self.target_dir))
         self.save_local_version(self.get_remote_version())

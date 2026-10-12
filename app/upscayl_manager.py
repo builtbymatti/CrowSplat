@@ -116,9 +116,11 @@ def download_binary(log_callback=None) -> Path:
     Raises RuntimeError on failure.
     """
     def log(msg: str):
+        # Callback when given, console otherwise: never both.
         if log_callback:
             log_callback(msg)
-        print(msg)
+        else:
+            print(msg)
 
     pinned = load_expected_checksums().get("upscayl_release", "")
     if not pinned:
@@ -142,7 +144,9 @@ def download_binary(log_callback=None) -> Path:
 
     req = urllib.request.Request(asset["browser_download_url"])
     with urllib.request.urlopen(req, timeout=120) as resp, open(str(archive_path), "wb") as f:  # nosec B310 - literal https URL supplied by the GitHub asset
-        f.write(resp.read())
+        # Streamed in chunks: the archive is tens of MB, no need to hold it in RAM.
+        for chunk in iter(lambda: resp.read(64 * 1024), b""):
+            f.write(chunk)
 
     checksums = load_expected_checksums()
     checksum_key = "darwin_upscayl" if platform.system() == "Darwin" else "linux_upscayl"
@@ -258,6 +262,13 @@ def run_upscayl(input_path, output_path, params,
     models_dir = params.get("models_dir") or get_effective_models_dir()
     if models_dir:
         models_dir = Path(models_dir)
+        if not (models_dir / f"{model_id}.bin").exists():
+            # Retired ids (e.g. RealESRGAN_General_x4_v3) resolve to the entry
+            # whose files are actually on disk.
+            from app.upscayl_models import get_model
+            known = get_model(model_id)
+            if known and known.id != model_id:
+                model_id = known.id
         if not (models_dir / f"{model_id}.bin").exists() or \
                 not (models_dir / f"{model_id}.param").exists():
             _log(f"❌ Modèle introuvable : {model_id} (.bin/.param manquant dans {models_dir})")

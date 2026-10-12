@@ -11,6 +11,7 @@ image outside ``NATIVE_IMAGE_EXTENSIONS`` is converted once on ingest (cf.
 ``convert_image``), so every downstream step only ever sees JPEG or PNG.
 """
 import logging
+import os
 import pathlib
 import re
 import shutil
@@ -146,8 +147,8 @@ def _exif_bytes(im):
         exif = im.getexif()
         if len(exif):
             return exif.tobytes()
-    except Exception:  # malformed EXIF must never fail the conversion
-        pass
+    except Exception as exc:  # malformed EXIF must never fail the conversion
+        logger.debug("EXIF read failed: %s", exc)
     return im.info.get("exif")
 
 
@@ -172,8 +173,6 @@ def _exists_nonempty(path) -> bool:
     try:
         return path.stat().st_size > 0
     except (AttributeError, OSError):
-        import os
-
         return os.path.isfile(path) and os.path.getsize(path) > 0
 
 

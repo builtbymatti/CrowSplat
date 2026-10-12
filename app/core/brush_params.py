@@ -108,6 +108,7 @@ class BrushParams:
     refine_mode: bool = False  # True = resume an existing training run
 
     def to_dict(self) -> dict:
+        """Return the parameters as a plain dict."""
         return asdict(self)
 
     @classmethod

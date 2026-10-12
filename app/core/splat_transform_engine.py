@@ -55,6 +55,7 @@ class SplatTransformEngine(BaseEngine):
         return shutil.which("splat-transform")
 
     def is_available(self) -> bool:
+        """Return True when the splat-transform binary was found and exists."""
         return self._bin is not None and Path(self._bin).exists()
 
     def transform(
@@ -114,15 +115,30 @@ class SplatTransformEngine(BaseEngine):
         self.log(f"SplatTransform: {safe_in.name} → {safe_out.name}")
         return self._execute_command(cmd)
 
+    @staticmethod
+    def _is_number(text: str) -> bool:
+        """Return True when ``text`` parses as a float (e.g. a negative value)."""
+        try:
+            float(text)
+        except ValueError:
+            return False
+        return True
+
     def _build_flags(self, params: dict[str, Any]) -> list:
+        """Translate allowlisted params into CLI flags; drop anything else."""
         flags = []
         for key, val in params.items():
             if key in self.ALLOWED_FLAGS_BOOLEAN:
                 if val:
                     flags.append(key)
             elif key in self.ALLOWED_FLAGS_VALUE:
-                if val is not None and str(val) != "":
-                    flags.extend([key, str(val)])
+                sval = str(val) if val is not None else ""
+                if sval.startswith("-") and not self._is_number(sval):
+                    # Would be parsed as a flag by splat-transform.
+                    self.log(f"Avertissement de sécurité: valeur ignorée pour {key} ({sval})")
+                    continue
+                if sval != "":
+                    flags.extend([key, sval])
             else:
                 self.log(f"Avertissement de sécurité: flag non autorisé ignoré ({key})")
         return flags

@@ -19,13 +19,6 @@ from PySide6.QtWidgets import QWidget
 
 from app.gui.styles import DEFAULT_THEME, THEMES, get_saved_theme
 
-# Resolved at import, like rail.py: styles.py broadcasts no theme-change signal
-# that a live widget could subscribe to.
-_THEME = THEMES.get(get_saved_theme(), THEMES[DEFAULT_THEME])
-_ACCENT = _THEME["accent"]
-_TRACK = _THEME["border"]
-_TEXT = _THEME["text"]
-
 _SIZE = 52          # outer square, in px
 _THICKNESS = 5      # ring stroke width
 _SWEEP = 100        # arc length of the indeterminate sweep, in degrees
@@ -39,6 +32,7 @@ class ProgressRing(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._value = None      # None → indeterminate
+        self._load_theme()
         self._angle = 0
         self.setFixedSize(_SIZE, _SIZE)
         self.setVisible(False)
@@ -46,6 +40,13 @@ class ProgressRing(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(_INTERVAL)
         self._timer.timeout.connect(self._advance)
+
+    def _load_theme(self):
+        """Resolve the ring colors from the saved theme (per instance, on start)."""
+        theme = THEMES.get(get_saved_theme(), THEMES[DEFAULT_THEME])
+        self._accent = theme["accent"]
+        self._track = theme["border"]
+        self._text = theme["text"]
 
     # ── Control ─────────────────────────────────────────────────────────────────
     def start(self):
@@ -57,6 +58,7 @@ class ProgressRing(QWidget):
         """
         self._value = None
         self._angle = 0
+        self._load_theme()
         self.setVisible(True)
         self._timer.start()
 
@@ -86,12 +88,12 @@ class ProgressRing(QWidget):
         inset = _THICKNESS / 2 + 1
         rect = QRectF(inset, inset, self.width() - 2 * inset, self.height() - 2 * inset)
 
-        pen = QPen(QColor(_TRACK), _THICKNESS)
+        pen = QPen(QColor(self._track), _THICKNESS)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
         painter.drawEllipse(rect)
 
-        pen.setColor(QColor(_ACCENT))
+        pen.setColor(QColor(self._accent))
         painter.setPen(pen)
         # Qt angles are in 1/16th of a degree, 0 at 3 o'clock, counter-clockwise
         # positive — hence starting at 90 (12 o'clock) and sweeping negative to
@@ -104,7 +106,7 @@ class ProgressRing(QWidget):
             font.setPointSizeF(max(9.0, _SIZE * 0.24))
             font.setBold(True)
             painter.setFont(font)
-            painter.setPen(QColor(_TEXT))
+            painter.setPen(QColor(self._text))
             painter.drawText(
                 self.rect(), Qt.AlignmentFlag.AlignCenter, f"{self._value}%"
             )

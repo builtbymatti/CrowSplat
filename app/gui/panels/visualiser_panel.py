@@ -7,8 +7,8 @@ position and rotation. Right bar: empty (content merged into the center, cf.
 
 The server's actual start/stop (``SuperSplatEngine.start_supersplat`` +
 ``start_data_server``) is wired to the local ``btn_toggle`` button — not a
-``Worker``/``QThread`` like the other modules (a continuous server, not a
-task with an end), hence independent of the topbar's global Launch/Cancel
+``Worker`` like the other modules (a continuous server, not a task with an
+end; only the slow start runs in a small ``QThread``), hence independent of the topbar's global Launch/Cancel
 button. ``StudioWindow.closeEvent`` calls ``self.engine.stop_all()`` as a
 safety net so no orphaned server is left running on close.
 """
@@ -17,7 +17,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import quote
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -38,12 +38,35 @@ from app.gui.widgets.dialog_utils import get_open_file_name
 from app.gui.widgets.drop_line_edit import DropLineEdit
 
 
+class SuperSplatStartWorker(QThread):
+    """Run ``SuperSplatEngine.start_supersplat`` off the GUI thread.
+
+    Its port-probe loop sleeps up to ~4 s while ``npx serve`` boots.
+    Emits ``finished_start(ok, message)``.
+    """
+
+    finished_start = Signal(bool, str)
+
+    def __init__(self, engine, port, parent=None):
+        super().__init__(parent)
+        self._engine = engine
+        self._port = port
+
+    def run(self):
+        try:
+            ok, msg = self._engine.start_supersplat(self._port)
+        except Exception as e:  # never leave the panel stuck in "starting"
+            ok, msg = False, str(e)
+        self.finished_start.emit(bool(ok), str(msg))
+
+
 class VisualiserPanel:
     """Plain panel exposing ``center`` and ``right``."""
 
     def __init__(self, run_state):
         self.run_state = run_state
         self._running = False
+        self._start_worker = None
         # Instantiated right away (like the old SuperSplatTab) so that
         # StudioWindow's closeEvent can always call stop_all(), even before
         # toggle_server() is wired to the real engine.
@@ -144,7 +167,27 @@ class VisualiserPanel:
             self._start_server()
 
     def _start_server(self):
-        success, msg = self.engine.start_supersplat(self.splat_port.value())
+        if self._start_worker is not None:
+            return
+        self.btn_toggle.setEnabled(False)
+        self.btn_toggle.setText(tr("view_starting", "Démarrage…"))
+        worker = SuperSplatStartWorker(self.engine, self.splat_port.value())
+        worker.finished_start.connect(self._on_start_finished)
+        self._start_worker = worker
+        worker.start()
+
+    def wait_start(self, timeout_ms=5000):
+        """Block (bounded) until a pending start finished; used on window close."""
+        worker = self._start_worker
+        if worker is not None:
+            worker.wait(timeout_ms)
+
+    def _on_start_finished(self, success, msg):
+        worker, self._start_worker = self._start_worker, None
+        if worker is not None:
+            worker.wait()
+        self.btn_toggle.setEnabled(True)
+        self._refresh_status()
         if not success:
             QMessageBox.critical(self.center, tr("msg_error", "Erreur"), msg)
             return
@@ -220,7 +263,7 @@ class VisualiserPanel:
 
     def _browse_input(self):
         path, _ = get_open_file_name(self.center, tr("btn_browse", "Parcourir"),
-                                     "", "Splats (*.ply *.spz);;Tous (*.*)")
+                                     "", "Splats (*.ply *.spz);;" + tr("filter_all", "All files (*.*)"))
         if path:
             self.input_path.setText(path)
 

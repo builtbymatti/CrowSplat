@@ -10,6 +10,7 @@ from pathlib import Path
 from app.upscayl_models import get_model
 
 from .base_engine import BaseEngine
+from .i18n import tr
 from .media import IMAGE_EXTENSIONS, convert_image
 
 
@@ -170,9 +171,9 @@ def run_upscale_job(input_path, output_dir, params, log_callback, cancel_check):
 
     model_id = params.get("model_id", "")
     if not model_id:
-        return False, "Aucun modèle sélectionné."
+        return False, tr("up_err_no_model", "No model selected.")
     if not find_binary():
-        return False, "upscayl-bin introuvable."
+        return False, tr("up_err_no_binary", "upscayl-bin not found.")
 
     fmt = params.get("format", "png")
     req_scale = params.get("scale", 4)
@@ -232,7 +233,7 @@ def run_upscale_job(input_path, output_dir, params, log_callback, cancel_check):
         if success[0] and x1_mode:
             resize_to_original(output_dir, orig_sizes)
 
-    return success[0], (output_dir if success[0] else "Upscale échoué.")
+    return success[0], (output_dir if success[0] else tr("up_err_failed", "Upscale failed."))
 
 
 def _staged_names(sources, suffix, fmt, root=None):

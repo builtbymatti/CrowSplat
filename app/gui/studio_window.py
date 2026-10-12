@@ -16,6 +16,7 @@ Sharp, SuperSplat, Upscale, SplatTransform, 4DGS) are instantiated
 dynamically and managed by ``PageRegistry``.
 """
 
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -79,7 +80,7 @@ from app.gui.pipeline_planner import plan_pipeline
 from app.gui.rail import TOOL_KEYS, Rail, item_label
 from app.gui.settings_window import ResetDialog, SettingsWindow
 from app.gui.studio_nav import PageRegistry
-from app.gui.styles import set_dark_theme
+from app.gui.styles import DEFAULT_THEME, THEMES, get_saved_theme, set_dark_theme
 from app.gui.workers import (
     BrushWorker,
     CleanerWorker,
@@ -99,6 +100,11 @@ _PAGE_KEYS = tuple(PIPELINE_STEPS) + tuple(TOOL_KEYS)
 
 # Languages written right-to-left: the whole UI is mirrored for them (G3).
 _RTL_LANGS = frozenset({"ar"})
+
+
+def _theme_color(key):
+    """Colour of the saved theme, read when a widget is built."""
+    return THEMES.get(get_saved_theme(), THEMES[DEFAULT_THEME])[key]
 
 
 def _is_safe_project_name(name):
@@ -202,7 +208,7 @@ class StudioWindow(QMainWindow):
         center_col = QVBoxLayout()
         center_col.setContentsMargins(8, 0, 8, 0)
         self.breadcrumb = QLabel("")
-        self.breadcrumb.setStyleSheet("color: #9aa5ce; padding: 4px 8px;")
+        self.breadcrumb.setStyleSheet(f"color: {_theme_color('muted')}; padding: 4px 8px;")
         center_col.addWidget(self.breadcrumb)
         self.center_stack = QStackedWidget()
         center_col.addWidget(self.center_stack, stretch=1)
@@ -377,7 +383,8 @@ class StudioWindow(QMainWindow):
         line.setFrameShape(QFrame.Shape.VLine)
         line.setFrameShadow(QFrame.Shadow.Plain)
         line.setFixedWidth(1)
-        line.setStyleSheet("color: #2f3549; background-color: #2f3549;")
+        border = _theme_color("border")
+        line.setStyleSheet(f"color: {border}; background-color: {border};")
         return line
 
     # ── Navigation ──────────────────────────────────────────────────────────────
@@ -1770,8 +1777,14 @@ class StudioWindow(QMainWindow):
             )
             worker.requestInterruption()
             worker.terminate()
-            worker.wait()
+            # Bounded: a deferred termination must not hang the close forever.
+            if not worker.wait(2000):
+                print("[WARN] worker still alive 2 s after terminate(); closing anyway",
+                      file=sys.stderr)
         for key in ("visualiser", "supersplat"):
+            wait_start = getattr(self.panels.get(key), "wait_start", None)
+            if wait_start is not None:
+                wait_start()
             engine = getattr(self.panels.get(key), "engine", None)
             if engine is not None:
                 engine.stop_all()

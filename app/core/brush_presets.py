@@ -11,7 +11,9 @@ Storage: a dedicated ``brush_presets.json`` file at the root, next to the
 
 import json
 import logging
+from pathlib import Path
 
+from .atomic_io import write_json_atomic
 from .config_io import is_safe_config_name
 from .system import resolve_project_root
 
@@ -52,7 +54,8 @@ BRUSH_PRESETS = {
 }
 
 
-def _store_path():
+def _store_path() -> Path:
+    """Return the location of the user presets file."""
     return resolve_project_root() / "brush_presets.json"
 
 
@@ -72,8 +75,7 @@ def load_user_presets() -> dict:
 
 
 def _write(presets: dict) -> None:
-    with open(_store_path(), "w", encoding="utf-8") as f:
-        json.dump(presets, f, indent=2, ensure_ascii=False)
+    write_json_atomic(_store_path(), presets)
 
 
 def save_user_preset(name: str, params: dict) -> None:

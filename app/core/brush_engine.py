@@ -133,29 +133,43 @@ class BrushEngine(BaseEngine):
 
         custom_args = params.get("custom_args")
         if custom_args:
-            build_mode = params.get("build_mode")
-            allowed = self.allowed_flags(build_mode)
-            args_list = custom_args.split()
-            safe_args = []
-            i = 0
-            while i < len(args_list):
-                arg = args_list[i]
-                if arg in allowed:
-                    safe_args.append(arg)
-                    if i + 1 < len(args_list) and not args_list[i + 1].startswith("--"):
-                        safe_args.append(args_list[i + 1])
-                        i += 1
-                elif arg in self.ALLOWED_FLAGS:
-                    # A real Brush flag, but for the other build mode: say so,
-                    # the user may just have picked the wrong mode.
-                    other = "source" if build_mode == "release" else "release"
-                    self.log(f"Avertissement: {arg} n'existe que dans le build Brush « {other} », ignoré")
-                else:
-                    self.log(f"Avertissement de sécurité: paramètre non autorisé ignoré ({arg})")
-                i += 1
-            cmd.extend(safe_args)
+            cmd.extend(self._filter_custom_args(custom_args, params.get("build_mode")))
         cmd.append(str(input_path))
         return cmd, env
+
+    def _filter_custom_args(self, custom_args: str, build_mode: str | None) -> list[str]:
+        """Keep only allowlisted flags (and their values) from a raw argument string."""
+        allowed = self.allowed_flags(build_mode)
+        args_list = custom_args.split()
+        safe_args: list[str] = []
+        i = 0
+        while i < len(args_list):
+            arg = args_list[i]
+            has_value = i + 1 < len(args_list) and not args_list[i + 1].startswith("--")
+            if arg in allowed:
+                if arg == "--export-name" and has_value and (
+                    "/" in args_list[i + 1] or "\\" in args_list[i + 1] or ".." in args_list[i + 1]
+                ):
+                    self.log(f"Avertissement de sécurité: nom d'export non autorisé ignoré ({args_list[i + 1]})")
+                    i += 2
+                    continue
+                safe_args.append(arg)
+                if has_value:
+                    safe_args.append(args_list[i + 1])
+                    i += 1
+            elif arg in self.ALLOWED_FLAGS:
+                # A real Brush flag, but for the other build mode: say so,
+                # the user may just have picked the wrong mode.
+                other = "source" if build_mode == "release" else "release"
+                self.log(f"Avertissement: {arg} n'existe que dans le build Brush « {other} », ignoré")
+                if has_value:
+                    i += 1
+            else:
+                self.log(f"Avertissement de sécurité: paramètre non autorisé ignoré ({arg})")
+                if has_value:
+                    i += 1
+            i += 1
+        return safe_args
 
     def train(self, input_path: str, output_path: str, params: dict[str, Any] | None = None) -> int:
         """Run the Brush training process.

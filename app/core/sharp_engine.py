@@ -86,8 +86,7 @@ class SharpEngine(BaseEngine):
             return [str(sharp_bin)]
 
         # 3. Anything named 'sharp' on PATH
-        from shutil import which
-        found = which("sharp")
+        found = shutil.which("sharp")
         if found:
             return [found]
 
@@ -126,13 +125,13 @@ class SharpEngine(BaseEngine):
         safe_input = self.validate_path(input_path)
         safe_output = self.validate_path(output_path)
         if safe_input is None:
-            self.log(f"SECURITY: Invalid input path: {input_path}")
+            self.log(f"SECURITY: Invalid input path: {os.path.basename(str(input_path))}")
             return -1
         if safe_output is None:
             # Output may not exist yet — check parent
             out_parent = Path(output_path).parent
             if self.validate_path(str(out_parent)) is None:
-                self.log(f"SECURITY: Invalid output path: {output_path}")
+                self.log(f"SECURITY: Invalid output path: {os.path.basename(str(output_path))}")
                 return -1
             safe_output = Path(output_path).resolve()
 
@@ -162,7 +161,7 @@ class SharpEngine(BaseEngine):
             if safe_ckpt:
                 cmd.extend(["-c", str(safe_ckpt)])
             else:
-                self.log(f"SECURITY: Invalid checkpoint path: {checkpoint}")
+                self.log(f"SECURITY: Invalid checkpoint path: {os.path.basename(str(checkpoint))}")
 
         device = params.get("device", self.device)
         if device == "mps" and not self._mps_usable():
@@ -185,7 +184,7 @@ class SharpEngine(BaseEngine):
         # Ensure all args are strings for Popen
         cmd = [str(arg) for arg in cmd]
 
-        self.log(f"Lancement Sharp: {' '.join(cmd)}")
+        self.log(f"Lancement Sharp: {self._redact_cmd(cmd)}")
 
         # GoF Template Method: delegation to the runner
         try:

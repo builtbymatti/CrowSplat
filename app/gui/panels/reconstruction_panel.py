@@ -14,7 +14,7 @@ Batch 3b: UI + params + resume detection. The actual dispatch (launch COLMAP,
 create the project on the fly) is wired in sub-batch 3c.
 """
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -116,7 +116,12 @@ class ReconstructionPanel:
         layout.addWidget(self.lbl_resume)
         resume_row = QHBoxLayout()
         self.resume_path = QLineEdit()
-        self.resume_path.textChanged.connect(self._on_resume_path_changed)
+        # Debounce ~300 ms: classify_resume_folder touches the disk and must
+        # not run on every keystroke (slow/network volumes).
+        self._resume_timer = QTimer()
+        self._resume_timer.setSingleShot(True)
+        self._resume_timer.timeout.connect(self._update_resume_status)
+        self.resume_path.textChanged.connect(lambda _text: self._resume_timer.start(300))
         resume_row.addWidget(self.resume_path)
         self.btn_browse_resume = QPushButton("📁")
         self.btn_browse_resume.clicked.connect(self._browse_resume)
@@ -281,7 +286,8 @@ class ReconstructionPanel:
     def _update_sequential_enabled(self, *_):
         self.sequential_overlap_spin.setEnabled(self.matcher_type_combo.currentText() == 'sequential')
 
-    def _on_resume_path_changed(self, text):
+    def _update_resume_status(self):
+        text = self.resume_path.text()
         kind = classify_resume_folder(text) if text.strip() else RESUME_INVALID
         self.lbl_resume_status.setText(self._resume_status_text(kind))
 
@@ -293,7 +299,7 @@ class ReconstructionPanel:
         return ""
 
     def _browse_resume(self):
-        path = get_existing_directory(self.center, tr("recon_resume", "Reprise de COLMAP"))
+        path = get_existing_directory(self.center, tr("recon_resume", "Reprise de COLMAP (dossier projet ou images)"))
         if path:
             self.resume_path.setText(path)
 
@@ -407,4 +413,4 @@ class ReconstructionPanel:
         self.lbl_thermal.setText(tr("check_thermal_throttling", "Limitation thermique"))
         self.lbl_undistort.setText(tr("source_undistort", "Générer images non-distordues"))
         self.btn_run.setText(tr("btn_run", "Lancer"))
-        self._on_resume_path_changed(self.resume_path.text())
+        self._update_resume_status()

@@ -29,6 +29,8 @@ _MATCHER_TYPES = ['exhaustive', 'sequential']
 
 
 class FourDGSPanel:
+    """4DGS options panel (OPTIONS › 4DGS): Nerfstudio dataset creation from videos."""
+
     def __init__(self, run_state):
         self.run_state = run_state
         self.center = self._build_center()

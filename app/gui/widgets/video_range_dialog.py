@@ -9,7 +9,7 @@ point is to choose two timestamps, not to watch the video.
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog,
@@ -37,6 +37,33 @@ _SCRUB_DEBOUNCE_MS = 120
 # The slider works in integer steps, so the timeline is divided into this many.
 _SLIDER_STEPS = 1000
 
+# Workers still running when their dialog closes: kept alive here so a running
+# QThread is never destroyed (SIGABRT), and dropped once they finish.
+_ORPHAN_WORKERS: set = set()
+
+
+class _FrameWorker(QThread):
+    """Run one blocking media call (ffprobe/ffmpeg) off the GUI thread.
+
+    Emits ``done(request_id, result)``; the receiver compares the id with the
+    latest one it issued and drops anything older.
+    """
+
+    done = Signal(int, object)
+
+    def __init__(self, request_id, func, *args, parent=None):
+        super().__init__(parent)
+        self._request_id = request_id
+        self._func = func
+        self._args = args
+
+    def run(self):
+        try:
+            result = self._func(*self._args)
+        except Exception:  # a failing probe/extract must read as "no result"
+            result = None
+        self.done.emit(self._request_id, result)
+
 
 class VideoRangeDialog(QDialog):
     """Pick a start and an end timestamp. Returns them through `selected_range`."""
@@ -44,7 +71,10 @@ class VideoRangeDialog(QDialog):
     def __init__(self, video_path, parent=None, initial=None):
         super().__init__(parent)
         self.video_path = str(video_path)
-        self.duration = probe_video_duration(self.video_path)
+        # Filled in by the probe worker; None means "unknown" until `_ready`.
+        self.duration = None
+        self._ready = False
+        self._initial = initial
         self.selected_range = None
         # Set before the unreadable-duration early return below, so the mark
         # handlers never meet a half-built object.
@@ -56,23 +86,42 @@ class VideoRangeDialog(QDialog):
         self._scrub_timer = QTimer(self)
         self._scrub_timer.setSingleShot(True)
         self._scrub_timer.timeout.connect(self._render_frame)
+        self._frame_req = 0
+        self._frame_worker = None
+        self._closed = False
 
         self.setWindowTitle(tr("video_range_title", "Sélection vidéo"))
         self.setMinimumWidth(680)
         self._build_ui()
 
+        # Nothing is usable until the duration is known.
+        self._set_controls_enabled(False)
+        self.preview.setText(tr("video_range_loading", "Chargement…"))
+        self._probe_worker = _FrameWorker(0, probe_video_duration, self.video_path, parent=self)
+        self._probe_worker.done.connect(self._on_probe_done)
+        self._probe_worker.start()
+
+    def _set_controls_enabled(self, enabled):
+        for widget in (self.slider, self.btn_in, self.btn_out, self.btn_reset,
+                       self.edit_in, self.edit_out,
+                       self.buttons.button(QDialogButtonBox.StandardButton.Ok)):
+            widget.setEnabled(enabled)
+
+    def _on_probe_done(self, _request_id, duration):
+        if self._closed:
+            return
+        self.duration = duration
+        self._ready = True
         if self.duration is None:
             # Unreadable duration means every timestamp below is meaningless.
             self.preview.setText(tr(
                 "video_range_unreadable",
                 "Durée de la vidéo illisible — sélection impossible.",
             ))
-            self.slider.setEnabled(False)
-            self.btn_in.setEnabled(False)
-            self.btn_out.setEnabled(False)
-            self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
-            return
+            return  # controls (incl. Reset) stay disabled
 
+        self._set_controls_enabled(True)
+        initial = self._initial
         start, end = 0.0, self.duration
         if initial:
             start = max(0.0, float(initial.get("start", 0.0)))
@@ -174,9 +223,34 @@ class VideoRangeDialog(QDialog):
         self._scrub_timer.start(_SCRUB_DEBOUNCE_MS)
 
     def _render_frame(self):
-        if self.duration is None:
+        """Request a still for the current position (asynchronous)."""
+        if self.duration is None or self._closed:
             return
-        if not extract_preview_frame(self.video_path, self.position, self._frame_path):
+        self._frame_req += 1
+        if self._frame_worker is not None:
+            return  # the running one hands over to the latest request when done
+        self._start_frame_worker()
+
+    def _start_frame_worker(self):
+        self.preview.setText(tr("video_range_loading", "Chargement…"))
+        worker = _FrameWorker(self._frame_req, extract_preview_frame,
+                              self.video_path, self.position, self._frame_path, parent=self)
+        worker.done.connect(self._on_frame_done)
+        self._frame_worker = worker
+        worker.start()
+
+    def _on_frame_done(self, request_id, ok):
+        worker, self._frame_worker = self._frame_worker, None
+        if worker is not None:
+            worker.wait()
+        if self._closed:
+            return
+        if request_id != self._frame_req:
+            # Stale: the slider moved on while this one was running.
+            if self._frame_worker is None:
+                self._start_frame_worker()
+            return
+        if not ok:
             self.preview.setText(tr("video_range_no_frame", "Aperçu indisponible"))
             return
         pix = QPixmap(str(self._frame_path))
@@ -188,6 +262,23 @@ class VideoRangeDialog(QDialog):
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         ))
+
+    def done(self, result):
+        """Stop pending work and remove the preview directory on any close."""
+        self._closed = True
+        self._scrub_timer.stop()
+        running = [w for w in (getattr(self, "_probe_worker", None), self._frame_worker)
+                   if w is not None and w.isRunning()]
+        if running:
+            # Never destroy a running QThread: detach it and clean up after it.
+            for w in running:
+                w.setParent(None)
+                _ORPHAN_WORKERS.add(w)
+                w.finished.connect(lambda w=w: _ORPHAN_WORKERS.discard(w))
+                w.finished.connect(self._tmpdir.cleanup)  # idempotent
+        else:
+            self._tmpdir.cleanup()
+        super().done(result)
 
     # ── Marks ───────────────────────────────────────────────────────────────
     def _set_in(self):

@@ -223,7 +223,9 @@ class BaseEngine:
         if self.stop_requested:
             return -1
 
-        self.log(f"Exec: {' '.join(map(str, cmd))}")
+        # Full line (absolute user paths) only at DEBUG; INFO gets basenames.
+        self.logger.debug("Exec: %s", " ".join(map(str, cmd)))
+        self.log("Exec: " + self._redact_cmd(cmd))
         try:
             self.runner.start(cmd, env=env, **kwargs)
             self.process = getattr(self.runner, '_process', None) # Legacy mapping
@@ -236,24 +238,9 @@ class BaseEngine:
                 elapsed = now - start_time
                 remaining = timeout - elapsed
 
-                # Wall-clock timeout — safety net for runaway processes
-                if remaining <= 0:
-                    self.log(f"Timeout after {timeout}s (wall-clock) — forcing termination", level=logging.WARNING)
-                    self.runner.terminate()
+                if self._deadline_exceeded(remaining, timeout, now - last_output_time,
+                                           inactivity_timeout):
                     return -1
-
-                # Inactivity timeout — detects frozen/blocked processes
-                if inactivity_timeout > 0:
-                    idle = now - last_output_time
-                    if idle >= inactivity_timeout:
-                        self.log(
-                            f"Inactivity timeout after {idle:.0f}s "
-                            f"(no stdout for {inactivity_timeout}s) — forcing termination",
-                            level=logging.WARNING
-                        )
-                        self.runner.terminate()
-                        return -1
-
                 # Checked every iteration, including select timeouts, so a
                 # silent process still honours cancellation and the watchdog.
                 if self.stop_requested:
@@ -270,12 +257,7 @@ class BaseEngine:
                 if line == "":
                     break  # EOF
                 last_output_time = _time.monotonic()  # reset inactivity timer on actual output
-                stripped = line.strip()
-                if stripped:
-                    if line_callback:
-                        line_callback(stripped)
-                    else:
-                        self.log(stripped)
+                self._dispatch_line(line, line_callback)
 
             return self.runner.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -286,6 +268,46 @@ class BaseEngine:
             self.logger.error("Exception in _execute_command", exc_info=True)
             self.log(f"Exception: {e}", level=logging.ERROR)
             return -1
+
+    def _dispatch_line(self, line: str, line_callback=None) -> None:
+        """Hand one non-empty stdout line to the callback, or log it."""
+        stripped = line.strip()
+        if not stripped:
+            return
+        if line_callback:
+            line_callback(stripped)
+        else:
+            self.log(stripped)
+
+    @staticmethod
+    def _redact_cmd(cmd: list) -> str:
+        """Command line with absolute paths reduced to their basename."""
+        parts = []
+        for arg in map(str, cmd):
+            if os.sep in arg and not arg.startswith("-"):
+                arg = os.path.basename(arg.rstrip(os.sep)) or arg
+            parts.append(arg)
+        return " ".join(parts)
+
+    def _deadline_exceeded(self, remaining: float, timeout: float, idle: float,
+                           inactivity_timeout: float) -> bool:
+        """Terminate the process and return True when a wall-clock or
+        inactivity timeout has been hit."""
+        # Wall-clock timeout — safety net for runaway processes
+        if remaining <= 0:
+            self.log(f"Timeout after {timeout}s (wall-clock) — forcing termination", level=logging.WARNING)
+            self.runner.terminate()
+            return True
+        # Inactivity timeout — detects frozen/blocked processes
+        if inactivity_timeout > 0 and idle >= inactivity_timeout:
+            self.log(
+                f"Inactivity timeout after {idle:.0f}s "
+                f"(no stdout for {inactivity_timeout}s) — forcing termination",
+                level=logging.WARNING
+            )
+            self.runner.terminate()
+            return True
+        return False
 
     def _kill_process(self, process):
         """Terminate a subprocess gracefully, using process group kill on Unix."""

@@ -106,7 +106,7 @@ class SourcePanel:
         decide what the rest of the panel means."""
         self.lbl_project = QLabel()
         self.input_project_name = QLineEdit()
-        self.input_project_name.setPlaceholderText("MonProjet")
+        self.input_project_name.setPlaceholderText(tr("source_project_placeholder", "MyProject"))
         # Mirror of the top bar: single source of truth in run_state (cf.
         # bind_text_field, same idiom as the chaining flags).
         self._bindings.append(bind_text_field(self.input_project_name, self.run_state, "project_name"))
@@ -122,15 +122,7 @@ class SourcePanel:
         self.combo_mode = QComboBox()
         for value, key, default in PIPELINE_MODES:
             self.combo_mode.addItem(tr(key, default), value)
-        fourdgs_index = self.combo_mode.findData("4dgs")
-        self.combo_mode.setItemData(
-            fourdgs_index,
-            tr(
-                "fourdgs_mode_tooltip",
-                "Préparation de dataset uniquement — pas d'entraînement disponible sur Apple Silicon.",
-            ),
-            Qt.ItemDataRole.ToolTipRole,
-        )
+        # The 4DGS tooltip is set in retranslate_ui (called from __init__).
         mode_row.addWidget(self.lbl_mode)
         mode_row.addWidget(self.combo_mode)
         layout.addLayout(mode_row)
@@ -565,6 +557,7 @@ class SourcePanel:
         for i, (_value, key, default) in enumerate(_BLUR_STRENGTHS):
             self.combo_blur.setItemText(i, tr(key, default))
         self.lbl_project.setText(tr("label_project_name", "Nom du projet"))
+        self.input_project_name.setPlaceholderText(tr("source_project_placeholder", "MyProject"))
         self.lbl_mode.setText(tr("topbar_mode", "Mode :"))
         for i, (value, key, default) in enumerate(PIPELINE_MODES):
             self.combo_mode.setItemText(i, tr(key, default))

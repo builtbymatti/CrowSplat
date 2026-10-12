@@ -73,13 +73,17 @@ def build_feature_matching_command(
     match_type = getattr(params, 'matching_type', 'SIFT_BRUTEFORCE')
     feat_type = getattr(params, 'feature_type', 'SIFT')
 
-    if params.matcher_type == 'sequential':
-        cmd = [
-            colmap_bin, 'sequential_matcher',
+    def common(subcommand):
+        return [
+            colmap_bin, subcommand,
             '--database_path', database_path,
             '--FeatureMatching.num_threads', str(num_threads),
             '--FeatureMatching.type', match_type,
             '--FeatureMatching.guided_matching', '1' if params.guided_matching else '0',
+        ]
+
+    if params.matcher_type == 'sequential':
+        cmd = common('sequential_matcher') + [
             '--SequentialMatching.overlap', str(params.sequential_overlap),
             '--SequentialMatching.quadratic_overlap', '1',
         ]
@@ -94,22 +98,10 @@ def build_feature_matching_command(
         # Vocab tree: matching by visual similarity, suited to large unordered
         # photo collections (far faster than exhaustive beyond ~500 images).
         # COLMAP downloads/caches the (SIFT) vocabulary tree on first use.
-        cmd = [
-            colmap_bin, 'vocab_tree_matcher',
-            '--database_path', database_path,
-            '--FeatureMatching.num_threads', str(num_threads),
-            '--FeatureMatching.type', match_type,
-            '--FeatureMatching.guided_matching', '1' if params.guided_matching else '0',
-        ]
+        cmd = common('vocab_tree_matcher')
         description = f"Matching Vocab Tree ({match_type})"
     else:
-        cmd = [
-            colmap_bin, 'exhaustive_matcher',
-            '--database_path', database_path,
-            '--FeatureMatching.num_threads', str(num_threads),
-            '--FeatureMatching.type', match_type,
-            '--FeatureMatching.guided_matching', '1' if params.guided_matching else '0',
-        ]
+        cmd = common('exhaustive_matcher')
         description = f"Matching Exhaustif ({match_type})"
 
     # Add algo-specific matching flags
@@ -131,6 +123,24 @@ def build_feature_matching_command(
     return cmd, description
 
 
+def _mapper_command(subcommand, prefix, colmap_bin, database_path, images_dir,
+                    sparse_dir, params, num_threads) -> list:
+    """Shared argv for the global and incremental mappers (only the subcommand
+    and the option prefix differ)."""
+    return [
+        colmap_bin, subcommand,
+        '--database_path', database_path,
+        '--image_path', images_dir,
+        '--output_path', str(sparse_dir),
+        f'--{prefix}.num_threads', str(num_threads),
+        f'--{prefix}.min_num_matches', str(params.min_num_matches),
+        f'--{prefix}.ignore_watermarks', '1' if params.ignore_watermarks else '0',
+        f'--{prefix}.ba_refine_focal_length', '1' if params.ba_refine_focal_length else '0',
+        f'--{prefix}.ba_refine_principal_point', '1' if params.ba_refine_principal_point else '0',
+        f'--{prefix}.ba_refine_extra_params', '1' if params.ba_refine_extra_params else '0',
+    ]
+
+
 def build_global_mapper_command(
     colmap_bin: str,
     database_path: str,
@@ -140,18 +150,8 @@ def build_global_mapper_command(
     num_threads: int,
 ) -> list:
     """3D reconstruction command through the global mapper (GLOMAP, COLMAP 4.0+)."""
-    return [
-        colmap_bin, 'global_mapper',
-        '--database_path', database_path,
-        '--image_path', images_dir,
-        '--output_path', str(sparse_dir),
-        '--GlobalMapper.num_threads', str(num_threads),
-        '--GlobalMapper.min_num_matches', str(params.min_num_matches),
-        '--GlobalMapper.ignore_watermarks', '1' if params.ignore_watermarks else '0',
-        '--GlobalMapper.ba_refine_focal_length', '1' if params.ba_refine_focal_length else '0',
-        '--GlobalMapper.ba_refine_principal_point', '1' if params.ba_refine_principal_point else '0',
-        '--GlobalMapper.ba_refine_extra_params', '1' if params.ba_refine_extra_params else '0',
-    ]
+    return _mapper_command('global_mapper', 'GlobalMapper', colmap_bin,
+                           database_path, images_dir, sparse_dir, params, num_threads)
 
 
 def build_incremental_mapper_command(
@@ -165,18 +165,8 @@ def build_incremental_mapper_command(
     """3D reconstruction command through the incremental mapper (fallback when
     the global mapper produces no usable model).
     """
-    return [
-        colmap_bin, 'mapper',
-        '--database_path', database_path,
-        '--image_path', images_dir,
-        '--output_path', str(sparse_dir),
-        '--Mapper.num_threads', str(num_threads),
-        '--Mapper.min_num_matches', str(params.min_num_matches),
-        '--Mapper.ignore_watermarks', '1' if params.ignore_watermarks else '0',
-        '--Mapper.ba_refine_focal_length', '1' if params.ba_refine_focal_length else '0',
-        '--Mapper.ba_refine_principal_point', '1' if params.ba_refine_principal_point else '0',
-        '--Mapper.ba_refine_extra_params', '1' if params.ba_refine_extra_params else '0',
-    ]
+    return _mapper_command('mapper', 'Mapper', colmap_bin,
+                           database_path, images_dir, sparse_dir, params, num_threads)
 
 
 def build_image_undistorter_command(

@@ -117,7 +117,12 @@ class ExportPanel:
         return self.spin_scale.value()
 
     def get_state(self):
-        return {"format": self.get_format(), "scale": self.get_scale()}
+        return {
+            "format": self.get_format(),
+            "scale": self.get_scale(),
+            "input": self.input_path.text(),
+            "output": self.output_path.text(),
+        }
 
     def set_state(self, state):
         if not state:
@@ -128,6 +133,10 @@ class ExportPanel:
                 self.combo_format.setCurrentIndex(idx)
         if "scale" in state:
             self.spin_scale.setValue(state["scale"])
+        if "input" in state:
+            self.input_path.setText(state["input"] or "")
+        if "output" in state:
+            self.output_path.setText(state["output"] or "")
 
     def _update_warning(self, *_):
         # GLB requires an optional dependency (trimesh/open3d/assimp/blender).
@@ -143,7 +152,7 @@ class ExportPanel:
 
     def _browse_input(self):
         paths, _ = get_open_file_names(self.center, tr("btn_browse", "Parcourir"), "",
-                                       "Splats (*.ply *.spz);;Tous (*.*)")
+                                       "Splats (*.ply *.spz);;" + tr("filter_all", "All files (*.*)"))
         if paths:
             self.input_path.setText("|".join(paths))
 

@@ -1,11 +1,10 @@
 """Brush engine dependency installer."""
-import contextlib
-import json
 import os
 import shutil
 import subprocess
 from pathlib import Path
 
+from app.core.atomic_io import read_json_dict
 from app.scripts.checksum_verifier import load_expected_checksums, verify_download_strict
 from app.scripts.installers.base import EngineDependency
 from app.scripts.installers.tools import install_rust_toolchain
@@ -39,9 +38,7 @@ class BrushEngineDep(EngineDependency):
         Adopting a new release stays a deliberate act, not a side effect of a
         third party's release calendar.
         """
-        config = {}
-        with contextlib.suppress(OSError, json.JSONDecodeError):
-            config = json.loads((self.root / "config.json").read_text())
+        config = read_json_dict(self.root / "config.json")
         build_mode = config.get("brush_params", {}).get("build_mode", "release")
 
         if build_mode == "source":
@@ -95,9 +92,7 @@ class BrushEngineDep(EngineDependency):
             return ""
 
     def install(self):
-        config = {}
-        with contextlib.suppress(OSError, json.JSONDecodeError):
-            config = json.loads((self.root / "config.json").read_text())
+        config = read_json_dict(self.root / "config.json")
         build_mode = config.get("brush_params", {}).get("build_mode", "release")
 
         if build_mode == "source":
@@ -239,7 +234,7 @@ class BrushEngineDep(EngineDependency):
                         if tar_member.issym() or tar_member.islnk():
                             print(f"⚠️ Rejected link archive member: {tar_member.name}")
                             continue
-                        tf.extract(tar_member, extract_dir)
+                        tf.extract(tar_member, extract_dir, filter="data")
         except Exception as e:
             print(f"⚠️ Extraction failed: {e}")
             archive_path.unlink(missing_ok=True)

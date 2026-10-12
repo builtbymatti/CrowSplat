@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from app import VERSION
 from app.core.system import resolve_project_root
+from app.gui.styles import DEFAULT_THEME, THEMES, get_saved_theme
 
 _ICON_PX = 20
 
@@ -48,7 +49,7 @@ class AppBar(QWidget):
         row.addWidget(lbl_name)
 
         lbl_version = QLabel(f"v{VERSION}")
-        lbl_version.setStyleSheet("color: #666666; font-size: 10px;")
+        lbl_version.setStyleSheet(f"color: {THEMES.get(get_saved_theme(), THEMES[DEFAULT_THEME])['muted']}; font-size: 10px;")
         row.addWidget(lbl_version)
 
         row.addStretch(1)

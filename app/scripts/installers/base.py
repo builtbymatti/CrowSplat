@@ -1,12 +1,12 @@
 """Base classes for engine dependency management."""
 import contextlib
-import json
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from app.core.atomic_io import read_json_dict
 from app.core.system import resolve_project_root
 
 
@@ -94,9 +94,16 @@ class EngineDependency:
             ["git", "-C", str(self.target_dir), "checkout", "--force", self.pinned_ref]
         )
 
-    def install(self):
-        """Must be overridden"""
-        raise NotImplementedError()
+    def install(self) -> bool:
+        """Install or update the engine; subclasses must override.
+
+        Contract: return True on success, False on failure. Some legacy
+        overrides still return None, so callers keep re-checking
+        ``is_installed()`` afterwards. Not a strict ``abstractmethod``: the base
+        class is instantiated directly for its shared helpers (version file,
+        git handling), which an ABC would forbid.
+        """
+        raise NotImplementedError(f"{type(self).__name__}.install() is not implemented")
 
     def uninstall(self):
         """Standard uninstallation: remove target_dir and version file"""
@@ -167,13 +174,7 @@ class DependencyManager:
         self.engines[engine.name] = engine
 
     def get_config(self) -> dict:
-        p = self.engines_dir.parent / "config.json"
-        if p.exists():
-            try:
-                return json.loads(p.read_text())
-            except (OSError, json.JSONDecodeError):
-                pass
-        return {}
+        return read_json_dict(self.engines_dir.parent / "config.json")
 
     @staticmethod
     def _confirm_install(name: str) -> bool:

@@ -12,6 +12,7 @@ from .system import (
     resolve_project_root,
     use_videotoolbox,
 )
+from .trim import trim_window
 
 # Path to the dedicated nerfstudio venv
 _VENV_4DGS = resolve_project_root() / ".venv_4dgs"
@@ -32,27 +33,10 @@ def _get_ns_process_data_path():
 
 
 def _trim_window(video_trim):
-    """(start, duration) in seconds from a ``{"start": .., "end": ..}`` dict.
-
-    Mirrors ``ColmapEngine._trim_window`` so the Source panel's shared trim
-    field means the same thing on both extraction paths. A pair that does not
-    describe a forward span is ignored (start/duration -> None, None) rather
-    than handed to ffmpeg, which would accept a zero/negative ``-t`` and
-    produce no frames at all.
-    """
+    """(start, duration) in seconds from a ``{"start": .., "end": ..}`` dict."""
     if not video_trim:
         return None, None
-    start = video_trim.get("start")
-    end = video_trim.get("end")
-    if start is None and end is None:
-        return None, None
-    start = max(0.0, float(start or 0.0))
-    if end is None:
-        return (start or None), None
-    end = float(end)
-    if end <= start:
-        return None, None
-    return (start or None), end - start
+    return trim_window(video_trim.get("start"), video_trim.get("end"))
 
 
 class FourDGSEngine(BaseEngine):
@@ -340,13 +324,13 @@ class FourDGSEngine(BaseEngine):
         safe_in = self.validate_path(videos_dir)
         safe_out = self.validate_path(output_dir) or self.validate_path(str(Path(output_dir).parent))
         if safe_in is None:
-            self.log(f"SECURITY: Invalid input directory: {videos_dir}")
+            self.log(f"SECURITY: Invalid input directory: {Path(str(videos_dir)).name}")
             return False
         if safe_out is None:
-            self.log(f"SECURITY: Invalid output directory: {output_dir}")
+            self.log(f"SECURITY: Invalid output directory: {Path(str(output_dir)).name}")
             return False
-        self.log(f"Scan du dossier : {videos_dir}")
-        videos_path = Path(videos_dir)
+        self.log(f"Scan du dossier : {safe_in.name}")
+        videos_path = Path(safe_in)
         videos = sorted([
             f for f in videos_path.iterdir()
             if is_video_file(f) and not f.name.startswith("._")
@@ -358,7 +342,7 @@ class FourDGSEngine(BaseEngine):
 
         self.log(f"Trouvé {len(videos)} vidéos. Début extraction...")
 
-        images_root = Path(output_dir) / "images"
+        images_root = Path(safe_out) / "images"
         images_root.mkdir(parents=True, exist_ok=True)
 
         # 1. Extraction
@@ -375,7 +359,7 @@ class FourDGSEngine(BaseEngine):
 
         self.log("Extraction terminée.")
 
-        if not self.upscale_dataset_images(output_dir):
+        if not self.upscale_dataset_images(str(safe_out)):
             return False
 
         if self.check_nerfstudio():
@@ -389,7 +373,7 @@ class FourDGSEngine(BaseEngine):
             # would not descend into the cam_XX subfolders anyway.
             try:
                 ns_images = self._build_static_reference_set(
-                    images_root, Path(output_dir) / "colmap_reference_frames"
+                    images_root, Path(safe_out) / "colmap_reference_frames"
                 )
             except RuntimeError as e:
                 self.log(str(e))
@@ -399,7 +383,7 @@ class FourDGSEngine(BaseEngine):
             cmd_ns = [
                 self.ns_process_data, "images",
                 "--data", str(ns_images),
-                "--output-dir", str(output_dir),
+                "--output-dir", str(safe_out),
                 "--verbose"
             ]
 
@@ -410,4 +394,4 @@ class FourDGSEngine(BaseEngine):
             return True
         else:
             self.log("Nerfstudio non trouvé. Lancement mode dégradé (COLMAP manuel uniquement).")
-            return self.run_colmap(output_dir, **(colmap_params or {}))
+            return self.run_colmap(str(safe_out), **(colmap_params or {}))

@@ -31,6 +31,7 @@ from .media import (
 )
 from .sparse_models import promote_largest_model
 from .system import compute_env, get_optimal_threads, is_apple_silicon, resolve_binary, use_videotoolbox
+from .trim import trim_window
 
 # Single shared list (app/core/media.py). Anything not natively readable by
 # every downstream tool is converted on ingest, cf. _prepare_images_from_files.
@@ -120,8 +121,21 @@ def _first_available_model() -> str:
         from app.upscayl_models import get_downloaded_models
         models = get_downloaded_models(get_models_dir())
         return models[0].id if models else ""
-    except Exception:
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Could not list upscayl models: %s", exc)
         return ""
+
+# (table, column) pairs holding image/frame ids that must follow a renumbering.
+_REMAPPED_ID_COLUMNS = (
+    ("images", "image_id"),
+    ("keypoints", "image_id"),
+    ("descriptors", "image_id"),
+    ("frames", "frame_id"),
+    ("frame_data", "frame_id"),
+    ("frame_data", "data_id"),
+    ("pose_priors", "corr_data_id"),
+)
+
 
 class ColmapEngine(BaseEngine):
     """COLMAP execution engine, independent of the graphical interface"""
@@ -180,7 +194,7 @@ class ColmapEngine(BaseEngine):
         try:
             setup_result = self._validate_and_setup_paths()
             if not setup_result:
-                return False, "Erreur de validation des chemins"
+                return False, tr("err_path_validation", "Erreur de validation des chemins")
             project_dir, images_dir, checkpoints_dir = setup_result
 
             if self.resume_colmap:
@@ -196,7 +210,7 @@ class ColmapEngine(BaseEngine):
             elif not self._process_input(project_dir, images_dir):
                 if self.is_cancelled():
                     return False, tr("USER_CANCELLED")
-                return False, "Erreur lors de la preparation de l'entree"
+                return False, tr("err_input_preparation", "Erreur lors de la préparation de l'entrée")
 
             pipeline_result, msg = self._run_reconstruction_pipeline(project_dir, images_dir)
             return pipeline_result, msg
@@ -205,8 +219,8 @@ class ColmapEngine(BaseEngine):
             self.log(f"Erreur lors de l'exécution du pipeline: {e}")
             self.logger.error("Exception in pipeline", exc_info=True)
             if self.is_cancelled():
-                return False, "Arrete par l'utilisateur"
-            return False, "Une erreur est survenue lors du traitement."
+                return False, tr("USER_CANCELLED")
+            return False, tr("err_pipeline_generic", "Une erreur est survenue lors du traitement.")
 
     def _validate_and_setup_paths(self) -> tuple[Path, Path, Path] | None:
         """Validate the input/output paths and prepare the folder structure."""
@@ -216,7 +230,7 @@ class ColmapEngine(BaseEngine):
             return None
         self.output_path = safe_output
 
-        if ".." in self.project_name or "/" in self.project_name or "\\" in self.project_name:
+        if self.project_name.strip() in ("", ".") or ".." in self.project_name or "/" in self.project_name or "\\" in self.project_name:
             self.log("Nom de projet invalide")
             return None
 
@@ -315,8 +329,8 @@ class ColmapEngine(BaseEngine):
             f"→ {blur_dir}"
         )
 
-    def _run_reconstruction_pipeline(self, project_dir: Path, images_dir: Path) -> tuple[bool, str]:
-        """Run the COLMAP reconstruction steps."""
+    def _reset_reconstruction_outputs(self, project_dir: Path) -> tuple[Path, Path]:
+        """Remove any previous sparse model / database; return their paths."""
         database_path = project_dir / "database.db"
         sparse_dir = project_dir / "sparse"
         if sparse_dir.exists():
@@ -332,6 +346,11 @@ class ColmapEngine(BaseEngine):
             if db_file.exists():
                 db_file.unlink(missing_ok=True)
                 self.log(f"Base de données précédente supprimée : {db_file.name}")
+        return database_path, sparse_dir
+
+    def _run_reconstruction_pipeline(self, project_dir: Path, images_dir: Path) -> tuple[bool, str]:
+        """Run the COLMAP reconstruction steps."""
+        database_path, sparse_dir = self._reset_reconstruction_outputs(project_dir)
 
         self.progress(25)
 
@@ -339,7 +358,7 @@ class ColmapEngine(BaseEngine):
             return False, tr("USER_CANCELLED")
         self.status(tr("status_feature_extraction", "Analyse des images en cours..."))
         if not self.feature_extraction(str(database_path), str(images_dir)):
-            return False, "Échec extraction features"
+            return False, tr("err_colmap_features", "Échec de l'extraction des features")
         if self.params.matcher_type == 'sequential':
             self._sort_colmap_database_images(database_path)
 
@@ -349,7 +368,7 @@ class ColmapEngine(BaseEngine):
             return False, tr("USER_CANCELLED")
         self.status(tr("status_feature_matching", "Recherche des points communs..."))
         if not self.feature_matching(str(database_path)):
-            return False, "Échec matching"
+            return False, tr("err_colmap_matching", "Échec du matching")
 
         self.progress(75)
 
@@ -364,7 +383,7 @@ class ColmapEngine(BaseEngine):
                 self.colmap_bin, 'view_graph_calibrator',
                 '--database_path', str(calib_db),
             ], "Calibration du graphe de vues", status_prefix="Calibration"):
-                return False, "Échec calibration"
+                return False, tr("err_colmap_calibration", "Échec de la calibration du graphe de vues")
             # Use the calibrated database for mapping
             database_path = calib_db
 
@@ -373,7 +392,7 @@ class ColmapEngine(BaseEngine):
 
         self.status(tr("status_reconstruction", "Création de la scène 3D..."))
         if not self.mapper(str(database_path), str(images_dir), sparse_dir):
-            return False, "Échec reconstruction"
+            return False, tr("err_colmap_reconstruction", "Échec de la reconstruction")
 
         self.progress(90)
 
@@ -384,7 +403,7 @@ class ColmapEngine(BaseEngine):
             dense_dir.mkdir(exist_ok=True)
             self.status(tr("status_undistorting", "Correction optique des images..."))
             if not self.image_undistorter(str(images_dir), str(sparse_dir), str(dense_dir)):
-                return False, "Echec undistortion"
+                return False, tr("err_colmap_undistort", "Échec de la correction optique")
 
         self.progress(95)
 
@@ -394,7 +413,7 @@ class ColmapEngine(BaseEngine):
             self.progress(100)
             return True, f"Dataset cree: {project_dir}"
 
-        return False, "Arrete par l'utilisateur"
+        return False, tr("USER_CANCELLED")
 
     def _prepare_images(self, images_dir: Path) -> bool:
         """Handle video extraction or image copying."""
@@ -499,6 +518,29 @@ class ColmapEngine(BaseEngine):
             counter += 1
         return target_path
 
+    def _log_conversion_summary(self, converted: int, total_files: int, fmt: str,
+                                converted_exts: set) -> None:
+        """Log how many source images were converted, and the HEIC caveat."""
+        exts = ", ".join(sorted(converted_exts))
+        self.log(
+            f"🔄 {converted}/{total_files} images converties en "
+            f"{fmt.upper()} ({exts}) — les originaux ne sont pas modifiés"
+        )
+        # The target format is a setting, but the GUI has no widget for
+        # it yet: naming it here is how a non-CLI user learns it exists
+        # and what it is currently set to.
+        self.log(
+            f"   Format de conversion : {fmt.upper()} "
+            f"(réglage « convert » — CLI : --convert png|jpeg|off)"
+        )
+        if converted_exts & {".heic", ".heif"}:
+            # sips is the only HEIC decoder available here and it drops
+            # the Exif sub-IFD, so the focal length prior is lost.
+            self.log(
+                "ℹ️ HEIC : la focale EXIF n'est pas conservée par la conversion "
+                "macOS — COLMAP l'estimera (≈ 1.2 × le plus grand côté)"
+            )
+
     def _prepare_images_from_files(self, images_dir: Path) -> bool:
         """Copy the source images into ``images_dir`` (APFS copy when possible)."""
         self.log("Copie des images sources vers le dossier de travail...")
@@ -538,30 +580,41 @@ class ColmapEngine(BaseEngine):
                     self.status(f"Copie des images : {i+1} / {total_files}")
 
             if converted:
-                exts = ", ".join(sorted(converted_exts))
-                self.log(
-                    f"🔄 {converted}/{total_files} images converties en "
-                    f"{fmt.upper()} ({exts}) — les originaux ne sont pas modifiés"
-                )
-                # The target format is a setting, but the GUI has no widget for
-                # it yet: naming it here is how a non-CLI user learns it exists
-                # and what it is currently set to.
-                self.log(
-                    f"   Format de conversion : {fmt.upper()} "
-                    f"(réglage « convert » — CLI : --convert png|jpeg|off)"
-                )
-                if converted_exts & {".heic", ".heif"}:
-                    # sips is the only HEIC decoder available here and it drops
-                    # the Exif sub-IFD, so the focal length prior is lost.
-                    self.log(
-                        "ℹ️ HEIC : la focale EXIF n'est pas conservée par la conversion "
-                        "macOS — COLMAP l'estimera (≈ 1.2 × le plus grand côté)"
-                    )
+                self._log_conversion_summary(converted, total_files, fmt, converted_exts)
             self.log(f"✅ {total_files} images copiées vers {images_dir}")
             return True
         except Exception as e:
             self.log(f"Erreur copie images: {e}")
             return False
+
+    def _stage_upscale_dirs(self, project_dir: Path, images_dir: Path,
+                            images_sources_dir: Path) -> tuple[Path, Path]:
+        """Prepare the upscale folders and return ``(input_dir, output_dir)``."""
+        # Where upscayl reads from and writes to. Normally the originals
+        # move to images_src and the output lands straight in images/.
+        upscale_input = images_sources_dir
+        upscale_output = images_dir
+        if not images_sources_dir.exists():
+            self.log(f"Moving originals to {images_sources_dir}...")
+            shutil.move(str(images_dir), str(images_sources_dir))
+            images_dir.mkdir(parents=True, exist_ok=True)
+        elif any(_is_valid_image_path(p) for p in images_dir.iterdir()):
+            # images_src already holds the originals — moved there by the
+            # copy step when the source was the project's own images/, or
+            # left by an upscale that never completed (F-003). Either way
+            # images/ now carries the converted, pipeline-ready copies, so
+            # those are what gets enlarged (the raw originals may be HEIC
+            # or TIFF, which upscayl cannot read). Output goes through a
+            # staging folder because input and output cannot be the same.
+            self.log("'images_src' already exists — upscaling the working copies in images/...")
+            upscale_input = images_dir
+            upscale_output = project_dir / "images_upscaling"
+            if upscale_output.exists():
+                shutil.rmtree(upscale_output)
+            upscale_output.mkdir(parents=True)
+        else:
+            self.log("'images_src' exists but upscale never completed — relaunching...")
+        return upscale_input, upscale_output
 
     def _run_upscale(self, project_dir: Path, images_dir: Path) -> bool:
         """Handle upscaling through upscayl-bin."""
@@ -584,30 +637,8 @@ class ColmapEngine(BaseEngine):
                 self.log("'images_src' already exists — upscale already done.")
                 return True
 
-            # Where upscayl reads from and writes to. Normally the originals
-            # move to images_src and the output lands straight in images/.
-            upscale_input = images_sources_dir
-            upscale_output = images_dir
-            if not images_sources_dir.exists():
-                self.log(f"Moving originals to {images_sources_dir}...")
-                shutil.move(str(images_dir), str(images_sources_dir))
-                images_dir.mkdir(parents=True, exist_ok=True)
-            elif any(_is_valid_image_path(p) for p in images_dir.iterdir()):
-                # images_src already holds the originals — moved there by the
-                # copy step when the source was the project's own images/, or
-                # left by an upscale that never completed (F-003). Either way
-                # images/ now carries the converted, pipeline-ready copies, so
-                # those are what gets enlarged (the raw originals may be HEIC
-                # or TIFF, which upscayl cannot read). Output goes through a
-                # staging folder because input and output cannot be the same.
-                self.log("'images_src' already exists — upscaling the working copies in images/...")
-                upscale_input = images_dir
-                upscale_output = project_dir / "images_upscaling"
-                if upscale_output.exists():
-                    shutil.rmtree(upscale_output)
-                upscale_output.mkdir(parents=True)
-            else:
-                self.log("'images_src' exists but upscale never completed — relaunching...")
+            upscale_input, upscale_output = self._stage_upscale_dirs(
+                project_dir, images_dir, images_sources_dir)
 
             upscale_conf = getattr(self, 'upscale_config', {}) or {}
             model_id    = upscale_conf.get("model_id") or _first_available_model()
@@ -722,25 +753,13 @@ class ColmapEngine(BaseEngine):
         """
         start = getattr(self.params, 'video_trim_start', None)
         end = getattr(self.params, 'video_trim_end', None)
-        if start is None and end is None:
-            return None, None
-        start = max(0.0, float(start or 0.0))
-        if end is None:
-            return (start or None), None
-        end = float(end)
-        if end <= start:
+        window = trim_window(start, end)
+        if end is not None and window[1] is None:
             self.log("⚠️ Plage vidéo incohérente (fin ≤ début) — vidéo entière extraite")
-            return None, None
-        return (start or None), end - start
+        return window
 
-    def extract_frames_from_video(self, video_path: str, images_dir: Path, prefix: str | None = None) -> bool:
-        """Extract the frames of a video through FFmpeg."""
-        base_name = Path(video_path).stem
-        self.log(f"\n{'='*60}\nExtraction frames: {Path(video_path).name}\n{'='*60}")
-        images_dir.mkdir(parents=True, exist_ok=True)
-
-        output_pattern = images_dir / (f'{prefix}_%04d.jpg' if prefix else 'frame_%04d.jpg')
-
+    def _build_extract_cmd(self, video_path: str, output_pattern: Path) -> list:
+        """Build the FFmpeg frame-extraction command (logs the retained range)."""
         cmd = [self.ffmpeg_bin]
         if self.is_silicon and use_videotoolbox(self.ffmpeg_bin):
             cmd.extend(['-hwaccel', 'videotoolbox'])
@@ -768,7 +787,10 @@ class ColmapEngine(BaseEngine):
                 f"Plage retenue : {format_timecode(start or 0.0)} → "
                 f"{format_timecode((start or 0.0) + (duration or 0.0))}"
             )
+        return cmd
 
+    def _make_ffmpeg_progress_parser(self, base_name: str):
+        """Return a line callback that logs FFmpeg progress and updates the status."""
         def _ffmpeg_parser(line_str: str):
             if 'frame=' in line_str or 'error' in line_str.lower():
                 self.log(line_str)
@@ -778,6 +800,18 @@ class ColmapEngine(BaseEngine):
                         self.status(f"Extraction {base_name} : image {f_num}")
                     except (IndexError, ValueError) as e:
                         self.logger.debug("Failed to parse frame number: %s", e)
+        return _ffmpeg_parser
+
+    def extract_frames_from_video(self, video_path: str, images_dir: Path, prefix: str | None = None) -> bool:
+        """Extract the frames of a video through FFmpeg."""
+        base_name = Path(video_path).stem
+        self.log(f"\n{'='*60}\nExtraction frames: {Path(video_path).name}\n{'='*60}")
+        images_dir.mkdir(parents=True, exist_ok=True)
+
+        output_pattern = images_dir / (f'{prefix}_%04d.jpg' if prefix else 'frame_%04d.jpg')
+
+        cmd = self._build_extract_cmd(video_path, output_pattern)
+        _ffmpeg_parser = self._make_ffmpeg_progress_parser(base_name)
 
         try:
             # Big videos / slow external drives: same ceiling as Brush (4h).
@@ -877,18 +911,48 @@ class ColmapEngine(BaseEngine):
         self.log(f"Liste d'images triee pour COLMAP: {len(files)} images")
         return image_list_path
 
-    def _sort_colmap_database_images(self, database_path: Path) -> None:
-        """Make image IDs follow filename order for COLMAP's sequential matcher."""
-        ALLOWED_COLUMNS = {
-            ("images", "image_id"),
-            ("keypoints", "image_id"),
-            ("descriptors", "image_id"),
-            ("frames", "frame_id"),
-            ("frame_data", "frame_id"),
-            ("frame_data", "data_id"),
-            ("pose_priors", "corr_data_id"),
+    @staticmethod
+    def _remap_image_ids(con, id_map: dict) -> None:
+        """Renumber image/frame ids in every COLMAP table through `id_map`."""
+        con.execute("PRAGMA foreign_keys=OFF")
+        con.execute("DELETE FROM matches")
+        con.execute("DELETE FROM two_view_geometries")
+        con.execute("CREATE TEMP TABLE image_id_map(old_id INTEGER PRIMARY KEY, new_id INTEGER NOT NULL)")
+        con.executemany(
+            "INSERT INTO image_id_map(old_id, new_id) VALUES (?, ?)",
+            id_map.items(),
+        )
+        table_columns = {
+            table_name: {
+                column[1]
+                for column in con.execute(f"PRAGMA table_info({table_name})").fetchall()
+            }
+            for table_name, in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
         }
 
+        offset = 1000000000
+        for table, column in _REMAPPED_ID_COLUMNS:
+            if column not in table_columns.get(table, set()):
+                continue
+            # nosec B608 - `table` and `column` do not come from user input:
+            # they are literals from _REMAPPED_ID_COLUMNS, filtered again by
+            # PRAGMA table_info.
+            # The values themselves go through bound "?" parameters.
+            shift_sql = (
+                f"UPDATE {table} SET {column} = "  # nosec B608
+                f"(SELECT new_id + ? FROM image_id_map WHERE old_id = {table}.{column}) "
+                f"WHERE {column} IN (SELECT old_id FROM image_id_map)"
+            )
+            con.execute(shift_sql, (offset,))
+            unshift_sql = (
+                f"UPDATE {table} SET {column} = {column} - ? WHERE {column} > ?"  # nosec B608
+            )
+            con.execute(unshift_sql, (offset, offset))
+
+    def _sort_colmap_database_images(self, database_path: Path) -> None:
+        """Make image IDs follow filename order for COLMAP's sequential matcher."""
         try:
             with sqlite3.connect(str(database_path)) as con:
                 rows = con.execute(
@@ -899,53 +963,7 @@ class ColmapEngine(BaseEngine):
                     self.log("Ordre des images COLMAP deja trie.")
                     return
 
-                con.execute("PRAGMA foreign_keys=OFF")
-                con.execute("DELETE FROM matches")
-                con.execute("DELETE FROM two_view_geometries")
-                con.execute("CREATE TEMP TABLE image_id_map(old_id INTEGER PRIMARY KEY, new_id INTEGER NOT NULL)")
-                con.executemany(
-                    "INSERT INTO image_id_map(old_id, new_id) VALUES (?, ?)",
-                    id_map.items(),
-                )
-                table_columns = {
-                    table_name: {
-                        column[1]
-                        for column in con.execute(f"PRAGMA table_info({table_name})").fetchall()
-                    }
-                    for table_name, in con.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table'"
-                    ).fetchall()
-                }
-
-                offset = 1000000000
-                for table, column in [
-                    ("images", "image_id"),
-                    ("keypoints", "image_id"),
-                    ("descriptors", "image_id"),
-                    ("frames", "frame_id"),
-                    ("frame_data", "frame_id"),
-                    ("frame_data", "data_id"),
-                    ("pose_priors", "corr_data_id"),
-                ]:
-                    if (table, column) not in ALLOWED_COLUMNS:
-                        continue
-                    if column not in table_columns.get(table, set()):
-                        continue
-                    # nosec B608 - `table` and `column` do not come from user input:
-                    # they are literals from the list above, filtered again by
-                    # ALLOWED_COLUMNS then by PRAGMA table_info.
-                    # The values themselves go through bound "?" parameters.
-                    shift_sql = (
-                        f"UPDATE {table} SET {column} = "  # nosec B608
-                        f"(SELECT new_id + ? FROM image_id_map WHERE old_id = {table}.{column}) "
-                        f"WHERE {column} IN (SELECT old_id FROM image_id_map)"
-                    )
-                    con.execute(shift_sql, (offset,))
-                    unshift_sql = (
-                        f"UPDATE {table} SET {column} = {column} - ? WHERE {column} > ?"  # nosec B608
-                    )
-                    con.execute(unshift_sql, (offset, offset))
-
+                self._remap_image_ids(con, id_map)
                 con.execute("DROP TABLE image_id_map")
                 con.execute(
                     "UPDATE sqlite_sequence SET seq = (SELECT MAX(image_id) FROM images) WHERE name = 'images'"

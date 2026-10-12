@@ -6,8 +6,11 @@ from app.scripts.installers.base import (
 )
 from app.scripts.installers.brush import BrushEngineDep
 from app.scripts.installers.extractor_360 import Extractor360EngineDep
+from app.scripts.installers.four_dgs import FourDGSEngineDep
 from app.scripts.installers.mapping import ColmapBrewDep
 from app.scripts.installers.sharp import SharpEngineDep
+from app.scripts.installers.splat_transform import SplatTransformEngineDep
+from app.scripts.installers.spz import SpzEngineDep
 from app.scripts.installers.supersplat import SuperSplatEngineDep
 from app.scripts.installers.tools import (
     check_brew,
@@ -38,6 +41,9 @@ __all__ = [
     "SuperSplatEngineDep",
     "Extractor360EngineDep",
     "UpscaylEngineDep",
+    "FourDGSEngineDep",
+    "SpzEngineDep",
+    "SplatTransformEngineDep",
     # Utility functions
     "load_config",
     "relax_requirements",

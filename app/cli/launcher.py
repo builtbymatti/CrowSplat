@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """GUI launcher helpers for CorbeauSplat."""
+import logging
 import sys
 from pathlib import Path as _Path
+
+logger = logging.getLogger(__name__)
 
 
 def _set_macos_dock_icon(icon_path: _Path):
@@ -11,7 +14,7 @@ def _set_macos_dock_icon(icon_path: _Path):
         if ns_image:
             NSApplication.sharedApplication().setApplicationIconImage_(ns_image)
     except Exception:
-        pass
+        logger.debug("Could not set the macOS dock icon", exc_info=True)
 
 
 def _launch_gui():
@@ -55,6 +58,7 @@ def _report_missing_dependencies(window):
     silently letting the user reach a failed run is what this check exists to
     prevent — that one interrupts.
     """
+    from app.core.i18n import tr
     from app.core.system import check_dependencies, rosetta_warning
 
     logs_window = getattr(window, "logs_window", None)
@@ -65,6 +69,7 @@ def _report_missing_dependencies(window):
     try:
         rosetta = rosetta_warning()
     except Exception:
+        logger.debug("rosetta_warning() failed", exc_info=True)
         rosetta = None
     if rosetta and logs_window is not None:
         logs_window.append_log(rosetta)
@@ -72,12 +77,15 @@ def _report_missing_dependencies(window):
     try:
         missing = check_dependencies()
     except Exception:
+        logger.warning("check_dependencies() failed; skipping the missing-tools report", exc_info=True)
         return
     if not missing:
         return
 
     if logs_window is not None:
-        logs_window.append_log("⚠️ Dépendances manquantes : " + ", ".join(missing))
+        logs_window.append_log(
+            "⚠️ " + tr("deps_missing_title", "Dépendances manquantes") + " : " + ", ".join(missing)
+        )
 
     # Feature entries carry a "name (feature)" label; core ones are bare.
     core_missing = [name for name in missing if "(" not in name]
@@ -85,8 +93,6 @@ def _report_missing_dependencies(window):
         return
 
     from PySide6.QtWidgets import QMessageBox
-
-    from app.core.i18n import tr
 
     box = QMessageBox(window)
     box.setIcon(QMessageBox.Icon.Warning)

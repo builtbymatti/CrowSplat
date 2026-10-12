@@ -61,6 +61,17 @@ _FIELD_DEFAULTS = {
 }
 
 
+def _flag_property(name: str) -> property:
+    """Build a bool property backed by ``RunState.get_flag/set_flag``."""
+    def getter(self) -> bool:
+        return self._flags[name]
+
+    def setter(self, value: bool) -> None:
+        self.set_flag(name, value)
+
+    return property(getter, setter, doc=f"Boolean flag '{name}'.")
+
+
 class RunState:
     """Observable shared state object.
 
@@ -125,61 +136,13 @@ class RunState:
     def project_name(self, value: str) -> None:
         self.set_field("project_name", value)
 
-    @property
-    def source_360(self) -> bool:
-        return self._flags["source_360"]
-
-    @source_360.setter
-    def source_360(self, value: bool) -> None:
-        self.set_flag("source_360", value)
-
-    @property
-    def upscaler_avant(self) -> bool:
-        return self._flags["upscaler_avant"]
-
-    @upscaler_avant.setter
-    def upscaler_avant(self, value: bool) -> None:
-        self.set_flag("upscaler_avant", value)
-
-    @property
-    def entrainement_apres(self) -> bool:
-        return self._flags["entrainement_apres"]
-
-    @entrainement_apres.setter
-    def entrainement_apres(self, value: bool) -> None:
-        self.set_flag("entrainement_apres", value)
-
-    @property
-    def nettoyer_apres(self) -> bool:
-        return self._flags["nettoyer_apres"]
-
-    @nettoyer_apres.setter
-    def nettoyer_apres(self, value: bool) -> None:
-        self.set_flag("nettoyer_apres", value)
-
-    @property
-    def exporter_apres(self) -> bool:
-        return self._flags["exporter_apres"]
-
-    @exporter_apres.setter
-    def exporter_apres(self, value: bool) -> None:
-        self.set_flag("exporter_apres", value)
-
-    @property
-    def visualiser_apres(self) -> bool:
-        return self._flags["visualiser_apres"]
-
-    @visualiser_apres.setter
-    def visualiser_apres(self, value: bool) -> None:
-        self.set_flag("visualiser_apres", value)
-
-    @property
-    def undistort_images(self) -> bool:
-        return self._flags["undistort_images"]
-
-    @undistort_images.setter
-    def undistort_images(self, value: bool) -> None:
-        self.set_flag("undistort_images", value)
+    source_360 = _flag_property("source_360")
+    upscaler_avant = _flag_property("upscaler_avant")
+    entrainement_apres = _flag_property("entrainement_apres")
+    nettoyer_apres = _flag_property("nettoyer_apres")
+    exporter_apres = _flag_property("exporter_apres")
+    visualiser_apres = _flag_property("visualiser_apres")
+    undistort_images = _flag_property("undistort_images")
 
     # ── Step status (drives the rail) ────────────────────────────────────────
     def get_status(self, step: str) -> StepStatus:

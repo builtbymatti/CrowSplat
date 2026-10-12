@@ -1,10 +1,13 @@
 import contextlib
 import functools
+import logging
 import os
 import platform
 import shutil
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @functools.cache
@@ -366,15 +369,15 @@ def log_numpy_backend() -> None:
             np.show_config()
         config_text = buf.getvalue()
         if "accelerate" in config_text.lower():
-            print("🔢 NumPy BLAS: Apple Accelerate (optimal)")
+            logger.info("NumPy BLAS: Apple Accelerate (optimal)")
         elif "openblas" in config_text.lower():
-            print("🔢 NumPy BLAS: OpenBLAS")
+            logger.info("NumPy BLAS: OpenBLAS")
         elif "lapack" in config_text.lower():
-            print("🔢 NumPy BLAS: LAPACK/BLAS (reference)")
+            logger.info("NumPy BLAS: LAPACK/BLAS (reference)")
         else:
-            print("🔢 NumPy BLAS: unknown (see numpy.show_config())")
-    except Exception:
-        pass  # NumPy may not be installed in headless/CLI-only mode
+            logger.info("NumPy BLAS: unknown (see numpy.show_config())")
+    except Exception as exc:  # NumPy may not be installed in headless/CLI-only mode
+        logger.debug("NumPy backend probe skipped: %s", exc)
 
 
 def check_ffmpeg_videotoolbox() -> bool:
@@ -389,18 +392,18 @@ def check_ffmpeg_videotoolbox() -> bool:
     """
     ffmpeg_bin = resolve_binary("ffmpeg")
     if not ffmpeg_bin:
-        print("⚠️  FFmpeg introuvable — vérification VideoToolbox impossible.")
+        logger.warning("FFmpeg not found - cannot check VideoToolbox support.")
         return False
 
     supported = ffmpeg_has_videotoolbox(ffmpeg_bin)
     if supported is True:
         if is_apple_silicon():
-            print("🎬 FFmpeg: VideoToolbox disponible (accélération HW) ✓")
+            logger.info("FFmpeg: VideoToolbox available (hardware acceleration)")
         return True
     if supported is False:
-        print(
-            "⚠️  FFmpeg installé SANS VideoToolbox. "
-            "Réinstallez avec : brew reinstall ffmpeg"
+        logger.warning(
+            "FFmpeg installed WITHOUT VideoToolbox. "
+            "Reinstall with: brew reinstall ffmpeg"
         )
     return False
 
@@ -466,7 +469,7 @@ def check_dependencies():
     # the one person it is meant to reach never saw it.
     message = rosetta_warning()
     if message:
-        print(message)
+        logger.warning("%s", message)
 
     # NumPy Accelerate check (macOS ARM64)
     log_numpy_backend()

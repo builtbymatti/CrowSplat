@@ -9,6 +9,7 @@ Nerfstudio) reads ``sparse/0`` only, so the largest model is moved there.
 from __future__ import annotations
 
 import re
+import shutil
 import struct
 from collections.abc import Callable
 from pathlib import Path
@@ -58,6 +59,12 @@ def promote_largest_model(sparse_dir: Path, log: Callable[[str], None] | None = 
     if best != zero:
         if zero.exists():
             swap = sparse_dir / "_swap"
+            if swap.exists():
+                # Leftover from an interrupted earlier promotion.
+                if swap.is_dir():
+                    shutil.rmtree(swap, ignore_errors=True)
+                else:
+                    swap.unlink(missing_ok=True)
             zero.rename(swap)
             best.rename(zero)
             swap.rename(sparse_dir / best.name)

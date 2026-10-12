@@ -102,7 +102,7 @@ class ColmapWorker(BaseWorker):
             # Check Upscale
             if self.upscale_params and self.upscale_params.get("active", False):
                 self.engine.upscale_config = self.upscale_params
-                self.log_signal.emit(tr("status_upscale_colmap", "--- Upscale activé pour COLMAP ---"))
+                self.log_signal.emit(tr("status_upscale_colmap", "Upscaling COLMAP..."))
 
             success, message = self.engine.run()
             self.finished_signal.emit(success, message)
@@ -270,7 +270,7 @@ class BrushWorker(BaseWorker):
     def _finalise(self, success):
         """Post-training renaming and pruning, then report the outcome."""
         if not success:
-            self.finished_signal.emit(False, "Brush a retourné une erreur (voir logs ci-dessus).")
+            self.finished_signal.emit(False, tr("worker_brush_failed", "Brush returned an error (see logs above)."))
             return
 
         self.handle_ply_rename()
@@ -278,7 +278,7 @@ class BrushWorker(BaseWorker):
             self._rename_checkpoints_with_project_name()
         if self.keep_only_latest:
             self._prune_to_latest_checkpoint()
-        self.finished_signal.emit(True, "Entrainement Brush terminé avec succès")
+        self.finished_signal.emit(True, tr("worker_brush_done", "Brush training finished successfully."))
 
     def _start_checkpoint_progress(self, poll_interval=3.0):
         """Approximate training progress from the checkpoints Brush drops on disk.
@@ -471,9 +471,17 @@ class SharpWorker(BaseWorker):
             returncode = self.engine.predict(self.input_path, self.output_path, self.params)
             success = (returncode == 0)
 
-            self.finished_signal.emit(success, "Prédiction Sharp terminée." if success else "Sharp a retourné une erreur (voir logs).")
+            self.finished_signal.emit(
+                success,
+                tr("worker_sharp_done", "Sharp prediction finished.") if success
+                else tr("worker_sharp_failed", "Sharp returned an error (see logs)."))
         except Exception as e:
+            self.log_signal.emit(f"EXCEPTION in SharpWorker: {e}\n{traceback.format_exc()}")
             self.finished_signal.emit(False, str(e))
+        finally:
+            # The pre-upscale step stages its files in the user's output folder.
+            if self.params.get("upscale", False):
+                shutil.rmtree(Path(self.output_path) / "temp_upscale", ignore_errors=True)
 
 class SharpVideoWorker(BaseWorker):
     """Thread worker for executing Apple ML Sharp on a sequence of frames from a video."""
@@ -554,9 +562,12 @@ class SharpVideoWorker(BaseWorker):
             )
 
             if success_count > 0:
-                self.finished_signal.emit(True, f"Conversion Video -> PLY terminée. {success_count} frames traitées avec succès.")
+                self.finished_signal.emit(True, tr(
+                    "worker_sharpvideo_done",
+                    "Video -> PLY conversion finished. {count} frame(s) processed successfully.",
+                ).format(count=success_count))
             else:
-                self.finished_signal.emit(False, "Aucune frame n'a pu être traitée par SHARP.")
+                self.finished_signal.emit(False, tr("worker_sharpvideo_none", "No frame could be processed by SHARP."))
 
         except Exception as e:
             self.log_signal.emit(f"EXCEPTION: {e}\n{traceback.format_exc()}")
@@ -575,19 +586,19 @@ class CleanerWorker(BaseWorker):
 
     def run(self):
         try:
-            self.log_signal.emit("--- Démarrage du nettoyage PLY ---")
+            self.log_signal.emit(tr("clean_start", "--- Starting PLY cleaning ---"))
 
             if self.input_path.is_dir():
                 # Folder mode
-                self.log_signal.emit(f"Nettoyage par lots : {self.input_path} → {self.output_path}")
+                self.log_signal.emit(tr("clean_batch", "Batch cleaning: {src} -> {dst}").format(src=self.input_path, dst=self.output_path))
                 self.output_path.mkdir(parents=True, exist_ok=True)
 
                 pattern = "**/*.ply" if self.recursive else "*.ply"
                 ply_files = sorted(f for f in self.input_path.glob(pattern) if not f.name.startswith('.'))
 
                 if not ply_files:
-                    self.log_signal.emit(f"Aucun fichier .ply trouvé dans {self.input_path}")
-                    self.finished_signal.emit(False, "Aucun fichier .ply trouvé.")
+                    self.log_signal.emit(tr("clean_no_ply_log", "No .ply file found in {path}").format(path=self.input_path))
+                    self.finished_signal.emit(False, tr("clean_no_ply", "No .ply file found."))
                     return
 
                 total = len(ply_files)
@@ -596,14 +607,14 @@ class CleanerWorker(BaseWorker):
 
                 for idx, ply_path in enumerate(ply_files, 1):
                     if self.isInterruptionRequested():
-                        self.log_signal.emit("Nettoyage annulé par l'utilisateur.")
+                        self.log_signal.emit(tr("clean_cancelled_log", "Cleaning cancelled by user."))
                         break
 
                     rel = ply_path.relative_to(self.input_path)
                     out_path = self.output_path / rel
                     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    self.log_signal.emit(f"[{idx}/{total}] Nettoyage de {ply_path.name}...")
+                    self.log_signal.emit(tr("clean_progress_item", "[{idx}/{total}] Cleaning {name}...").format(idx=idx, total=total, name=ply_path.name))
                     try:
                         stats = clean_ply(
                             ply_path, out_path,
@@ -612,29 +623,29 @@ class CleanerWorker(BaseWorker):
                             cancel_check=self.isInterruptionRequested,
                         )
                         self.log_signal.emit(
-                            f"  ✓ {stats['kept']}/{stats['total']} splats conservés "
-                            f"({stats['removed']} retirés)"
+                            tr("clean_item_stats", "  ✓ {kept}/{total} splats kept ({removed} removed)").format(
+                                kept=stats['kept'], total=stats['total'], removed=stats['removed'])
                         )
                         success_count += 1
                     except CleaningCancelled:
-                        self.log_signal.emit("Nettoyage annulé par l'utilisateur.")
+                        self.log_signal.emit(tr("clean_cancelled_log", "Cleaning cancelled by user."))
                         break
                     except ValueError as e:
-                        self.log_signal.emit(f"  ⚠️  {ply_path.name}: ignoré ({e})")
+                        self.log_signal.emit(tr("clean_item_skipped", "  ⚠️  {name}: skipped ({err})").format(name=ply_path.name, err=e))
                         fail_count += 1
                     except Exception as e:
                         self.log_signal.emit(f"  ❌  {ply_path.name}: {e}")
                         fail_count += 1
 
-                msg = (
-                    f"Nettoyage par lots terminé : {success_count} réussis, "
-                    f"{fail_count} échoués sur {total} fichiers."
-                )
+                msg = tr(
+                    "clean_batch_done",
+                    "Batch cleaning finished: {ok} succeeded, {failed} failed out of {total} files.",
+                ).format(ok=success_count, failed=fail_count, total=total)
                 self.finished_signal.emit(fail_count == 0, msg)
 
             else:
                 # Single-file mode (existing behavior)
-                self.log_signal.emit(f"Nettoyage de {self.input_path}...")
+                self.log_signal.emit(tr("clean_single", "Cleaning {path}...").format(path=self.input_path))
                 try:
                     stats = clean_ply(
                         self.input_path, self.output_path,
@@ -643,17 +654,17 @@ class CleanerWorker(BaseWorker):
                         cancel_check=self.isInterruptionRequested,
                     )
                 except CleaningCancelled:
-                    self.log_signal.emit("Nettoyage annulé par l'utilisateur.")
-                    self.finished_signal.emit(False, "Nettoyage annulé.")
+                    self.log_signal.emit(tr("clean_cancelled_log", "Cleaning cancelled by user."))
+                    self.finished_signal.emit(False, tr("clean_cancelled", "Cleaning cancelled."))
                     return
-                msg = (
-                    f"Nettoyage terminé : {stats['kept']}/{stats['total']} splats conservés "
-                    f"({stats['removed']} retirés)"
-                )
+                msg = tr(
+                    "clean_single_done",
+                    "Cleaning finished: {kept}/{total} splats kept ({removed} removed)",
+                ).format(kept=stats['kept'], total=stats['total'], removed=stats['removed'])
                 self.finished_signal.emit(True, msg)
 
         except Exception as e:
-            self.log_signal.emit(f"ERREUR nettoyage PLY : {e}")
+            self.log_signal.emit(tr("clean_error", "PLY cleaning ERROR: {err}").format(err=e))
             self.finished_signal.emit(False, str(e))
 
 
@@ -742,8 +753,10 @@ class FourDGSWorker(BaseWorker):
                     and self.engine.run_colmap(self.output_dir, **self.colmap_params)
                 )
 
-            self.finished_signal.emit(success, "Dataset 4DGS créé avec succès." if success else "Échec du traitement 4DGS.")
+            self.finished_signal.emit(success, tr("worker_4dgs_done", "4DGS dataset created successfully.") if success
+                                     else tr("worker_4dgs_failed", "4DGS processing failed."))
         except Exception as e:
+            self.log_signal.emit(f"EXCEPTION in FourDGSWorker: {e}\n{traceback.format_exc()}")
             self.finished_signal.emit(False, str(e))
 
     def stop(self):
@@ -775,22 +788,23 @@ class ExportWorker(BaseWorker):
 
         total = len(self.input_paths)
         if total == 0:
-            self.finished_signal.emit(False, "Aucun fichier à exporter.")
+            self.finished_signal.emit(False, tr("export_none", "No file to export."))
             return
 
-        self.log_signal.emit(f"--- Démarrage de l'export ({self.output_format.upper()}) ---")
-        self.log_signal.emit(f"{total} fichier(s) à traiter. Sortie: {self.output_dir}")
+        self.log_signal.emit(tr("export_start", "--- Starting export ({fmt}) ---").format(fmt=self.output_format.upper()))
+        self.log_signal.emit(tr("export_count", "{total} file(s) to process. Output: {dir}").format(total=total, dir=self.output_dir))
 
         engine = ExportEngine(logger_callback=self.log_signal.emit)
         success_count = 0
+        cancelled = False
 
         for idx, input_path in enumerate(self.input_paths, 1):
             if self.isInterruptionRequested():
-                self.log_signal.emit("Export annulé par l'utilisateur.")
+                self.log_signal.emit(tr("export_cancelled_log", "Export cancelled by user."))
+                cancelled = True
                 break
 
-            self.progress_signal.emit(int((idx / total) * 100))
-            self.status_signal.emit(f"Export {idx}/{total}: {Path(input_path).name}")
+            self.status_signal.emit(tr("export_status", "Export {idx}/{total}: {name}").format(idx=idx, total=total, name=Path(input_path).name))
 
             try:
                 ok = engine.export(str(input_path), str(self.output_dir), self.output_format, options=self.options)
@@ -801,12 +815,19 @@ class ExportWorker(BaseWorker):
                     self.log_signal.emit(f"  ❌ {Path(input_path).name}")
             except Exception as e:
                 self.log_signal.emit(f"  ❌ {Path(input_path).name}: {e}")
+            # Reported once the file is done, so the bar only reaches 100% when
+            # the last export has really finished.
+            self.progress_signal.emit(int((idx / total) * 100))
 
-        msg = (
-            f"Export terminé : {success_count}/{total} réussis"
-            if success_count == total
-            else f"Export partiel : {success_count}/{total} réussis"
-        )
+        if cancelled:
+            msg = tr("worker_export_cancelled", "Export cancelled: {done}/{total} done").format(
+                done=success_count, total=total)
+        elif success_count == total:
+            msg = tr("worker_export_done", "Export finished: {done}/{total} succeeded").format(
+                done=success_count, total=total)
+        else:
+            msg = tr("worker_export_partial", "Partial export: {done}/{total} succeeded").format(
+                done=success_count, total=total)
         self.finished_signal.emit(success_count == total, msg)
 
 
@@ -830,6 +851,7 @@ class ModelDownloadWorker(QThread):
 
         model = get_model(self.model_id)
         if model is None:
+            # The payload is always a display label; fall back to the raw id.
             self.finished_signal.emit(False, self.model_id)
             return
         try:
@@ -908,12 +930,12 @@ class UpscaleImagesWorker(QThread):
             engine = UpscaleEngine(logger_callback=self.log_signal.emit)
             safe_in = engine.validate_path(self.images_dir)
             if safe_in is None or not safe_in.is_dir():
-                self.finished_signal.emit(False, f"Dossier d'images invalide : {self.images_dir}")
+                self.finished_signal.emit(False, tr("worker_invalid_images_dir", "Invalid image folder: {path}").format(path=self.images_dir))
                 return
             out = Path(self.output_dir)
             safe_out = engine.validate_path(str(out.parent))
             if safe_out is None:
-                self.finished_signal.emit(False, f"Destination invalide : {self.output_dir}")
+                self.finished_signal.emit(False, tr("worker_invalid_dest", "Invalid destination: {path}").format(path=self.output_dir))
                 return
             dest = safe_out / out.name
             dest.mkdir(parents=True, exist_ok=True)

@@ -225,6 +225,10 @@ def _write_atomically(ply_data, output_path):
     os.close(fd)
     try:
         ply_data.write(tmp_name)
+        # mkstemp creates the file 0600; restore the usual umask-based mode.
+        umask = os.umask(0)
+        os.umask(umask)
+        os.chmod(tmp_name, 0o666 & ~umask)
         os.replace(tmp_name, str(output_path))
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)

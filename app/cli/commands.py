@@ -289,6 +289,7 @@ def run_brush(args):
     except KeyboardInterrupt:
         print(tr("cli_stopping"))
         engine.stop()
+        sys.exit(130)
 
 
 def _apply_sharp_upscale(args) -> str:
@@ -343,6 +344,11 @@ def run_sharp(args):
         except KeyboardInterrupt:
             print(tr("cli_stopping"))
             engine.stop()
+            sys.exit(130)
+        finally:
+            if sharp_input != args.input:
+                import shutil
+                shutil.rmtree(_Path(args.output) / "temp_upscale", ignore_errors=True)
 
     else:  # video mode
         # Mirrors the GUI: SharpVideoWorker never reads "upscale" either — the
@@ -376,7 +382,7 @@ def _run_sharp_video(args, engine, params):
     except KeyboardInterrupt:
         print(tr("cli_stopping"))
         engine.stop()
-        sys.exit(1)
+        sys.exit(130)
 
     print(f"Terminé : {success_count} frames converties.")
     if success_count == 0:
@@ -430,6 +436,7 @@ def run_supersplat(args):
     except KeyboardInterrupt:
         print(tr("cli_server_stop"))
         engine.stop_all()
+        sys.exit(130)
 
 
 def run_upscale(args):
@@ -471,7 +478,7 @@ def run_upscale(args):
             msg = "Upscale terminé." if success else "Upscale échoué."
     except KeyboardInterrupt:
         print(tr("cli_stopping"))
-        sys.exit(0)
+        sys.exit(130)
 
     print(f"{'Succès' if success else 'Erreur'} : {msg}")
     if not success:
@@ -508,7 +515,7 @@ def run_4dgs(args):
     except KeyboardInterrupt:
         print(tr("cli_stopping"))
         engine.stop()
-        sys.exit(0)
+        sys.exit(130)
 
     print("Terminé avec succès." if success else "Erreur lors du traitement.")
     if not success:
@@ -653,15 +660,16 @@ def run_splat_transform(args):
 
     print(f"SplatTransform: {input_path} → {output_file}")
     print(f"  Format  : {args.format}")
-    if params:
-        print(f"  Options : {', '.join(k for k in params if params[k] is not True)}")
+    shown = [k if v is True else f"{k} {v}" for k, v in params.items() if k != "--overwrite"]
+    if shown:
+        print(f"  Options : {', '.join(shown)}")
 
     try:
         returncode = engine.transform(str(input_path), str(output_file), params)
     except KeyboardInterrupt:
         print(tr("cli_stopping"))
         engine.stop()
-        sys.exit(0)
+        sys.exit(130)
 
     if returncode == 0:
         print(tr("msg_success"))
@@ -708,7 +716,7 @@ def run_extract360(args):
     except KeyboardInterrupt:
         print(tr("cli_stopping"))
         engine.stop()
-        sys.exit(0)
+        sys.exit(130)
 
     print("Terminé avec succès." if success else "Erreur lors de l'extraction.")
     if not success:
@@ -716,7 +724,7 @@ def run_extract360(args):
 
 
 def _sep(title):
-    return print(f"\n{'─' * 50}\n  {title}\n{'─' * 50}")
+    print(f"\n{'─' * 50}\n  {title}\n{'─' * 50}")
 
 
 def run_pipeline(args):
@@ -748,7 +756,7 @@ def run_pipeline(args):
     except KeyboardInterrupt:
         print(tr("cli_stopping"))
         colmap_engine.stop()
-        sys.exit(0)
+        sys.exit(130)
 
     if not success:
         print(f"\nErreur COLMAP : {msg}")
@@ -796,7 +804,7 @@ def run_pipeline(args):
     except KeyboardInterrupt:
         print(tr("cli_stopping"))
         brush_engine.stop()
-        sys.exit(0)
+        sys.exit(130)
 
     if returncode != 0:
         print(f"\nBrush a retourné une erreur (code {returncode}).")

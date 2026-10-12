@@ -45,7 +45,7 @@ class LanguageManager:
     def _load_translations(self):
         """Load translations from JSON for the current language"""
         try:
-            locales_dir = resolve_project_root() / "assets" / "locales"
+            locales_dir = _locales_dir()
             lang_path = locales_dir / f"{self.current_lang}.json"
 
             # Fallback to English if current lang doesn't exist

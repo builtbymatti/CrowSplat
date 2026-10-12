@@ -1,11 +1,12 @@
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
 from app.core.system import resolve_project_root
@@ -127,8 +128,58 @@ class SessionManager:
                 run_state.load_dict(flags)
 
 
+class _SetupThread(QThread):
+    """Runs the dependency setup off the GUI thread; emits its return code."""
+
+    done = Signal(int)
+
+    def __init__(self, python, root_dir, safe_argv):
+        super().__init__()
+        self._python = python
+        self._root_dir = root_dir
+        self._safe_argv = safe_argv
+        # A bound method of this QObject (which lives in the GUI thread) makes
+        # Qt deliver ``done`` as a queued call on the GUI thread.
+        self.done.connect(self._on_done)
+
+    def _on_done(self, code):
+        AppLifecycle._relaunch_after_setup(
+            code, self._python, self._root_dir / "main.py", self._root_dir, self._safe_argv)
+
+    def run(self):
+        # FIX(AUDIT): use direct subprocess calls instead of bash -c
+        # to prevent command injection via f-string interpolation.
+        try:
+            setup = subprocess.run(
+                [self._python, "-m", "app.scripts.setup_dependencies", "--startup"],
+                cwd=str(self._root_dir)
+            )
+            code = setup.returncode
+        except OSError as e:
+            logger.error("Setup could not start: %s", e)
+            code = -1
+        self.done.emit(code if isinstance(code, int) else 0)
+
+
 class AppLifecycle:
     """SOLID-SRP: responsible for restarting the OS process and external ones"""
+    # Keeps the setup thread alive until its result is handled.
+    _setup_thread = None
+
+    @staticmethod
+    def _relaunch_after_setup(code, python, main_py, root_dir, safe_argv):
+        """GUI-thread slot: relaunch only when the setup succeeded."""
+        AppLifecycle._setup_thread = None
+        if code != 0:
+            logger.error("Setup failed (code %s): aborting relaunch.", code)
+            return
+        subprocess.Popen(
+            [python, str(main_py)] + safe_argv,
+            cwd=str(root_dir), start_new_session=True
+        )
+        QApplication.quit()
+        sys.exit(0)
+
     @staticmethod
     def restart(save_callback=None):
         if save_callback:
@@ -148,18 +199,12 @@ class AppLifecycle:
             logger.info("Reinstall detected: running setup before relaunch...")
             # Build safe argv: whitelist known flags only
             safe_argv = [a for a in sys.argv[1:] if a in ("--gui", "--debug", "--reset")]
-            # FIX(AUDIT): use direct subprocess calls instead of bash -c
-            # to prevent command injection via f-string interpolation.
-            subprocess.run(
-                [python, "-m", "app.scripts.setup_dependencies", "--startup"],
-                cwd=str(root_dir)
-            )
-            subprocess.Popen(
-                [python, str(main_py)] + safe_argv,
-                cwd=str(root_dir), start_new_session=True
-            )
-            QApplication.quit()
-            sys.exit(0)
+            # The setup can take minutes: run it in a worker thread so the
+            # window keeps repainting, and relaunch from the done slot.
+            thread = _SetupThread(python, root_dir, safe_argv)
+            AppLifecycle._setup_thread = thread
+            thread.start()
+            return
 
         # Normal relaunch
         args = [python, str(main_py)] + sys.argv[1:]
@@ -198,7 +243,6 @@ class AppLifecycle:
         logger.info("Reset Factory %s initié sur: %s", "DEEP" if deep else "LIGHT", root_dir)
 
         # Validate containment: every target must resolve inside project root
-        import shutil as _shutil
         for rel in list(targets_rel):
             target = (root_dir / rel).resolve()
             try:
@@ -213,7 +257,7 @@ class AppLifecycle:
                 try:
                     logger.warning("Reset: removing %s", target)
                     if target.is_dir():
-                        _shutil.rmtree(target, ignore_errors=False)
+                        shutil.rmtree(target, ignore_errors=False)
                     else:
                         target.unlink()
                 except OSError as e:

@@ -108,14 +108,10 @@ _TOOL_LABEL_KEYS = {
     "4dgs": ("rail_tool_4dgs", "4DGS"),
 }
 
-# Theme colors resolved once at import time. styles.py does not currently
-# broadcast a "theme changed" signal that live widgets can subscribe to, so
-# this mirrors the same non-reactive approach already used below for
-# _ITEM_STYLE's hardcoded selection accent (it only reflects the theme saved
-# in config.json at process start, same as the rest of the rail).
-_THEME = THEMES.get(get_saved_theme(), THEMES[DEFAULT_THEME])
-_BORDER_COLOR = _THEME["border"]
-_MUTED_COLOR = _THEME["muted"]
+def _theme():
+    """Theme colors, read when a widget is built (not at import time)."""
+    return THEMES.get(get_saved_theme(), THEMES[DEFAULT_THEME])
+
 
 # Same blue as _ITEM_STYLE's ``:checked`` state below (#7aa2f7 == rgba(122,162,247)).
 # Projet's permanent accent intentionally matches this literal rather than the
@@ -150,16 +146,23 @@ _ROOT_EXTRA_STYLE = (
 _OUTILS_EXTRA_STYLE = "QPushButton { padding-left: 20px; }"
 
 # Vertical trunk connecting PARAMÈTRES items back to Projet.
-_TREE_TRUNK_STYLE = f"border: none; border-left: 1px solid {_BORDER_COLOR};"
+def _tree_trunk_style():
+    return f"border: none; border-left: 1px solid {_theme()['border']};"
+
 # Short horizontal dash bridging the trunk to each item row.
-_DASH_STYLE = f"border: none; background-color: {_BORDER_COLOR};"
+def _dash_style():
+    return f"border: none; background-color: {_theme()['border']};"
+
 # Full-width rule separating OUTILS from PARAMÈTRES.
-_SEPARATOR_STYLE = f"border: none; border-top: 1px solid {_BORDER_COLOR};"
+def _separator_style():
+    return f"border: none; border-top: 1px solid {_theme()['border']};"
+
 # Static (non-clickable) group label: small caps, muted, no dropdown affordance.
-_GROUP_LABEL_STYLE = (
-    f"color: {_MUTED_COLOR}; font-size: 10px; font-weight: 700;"
-    " letter-spacing: 1px; background: transparent;"
-)
+def _group_label_style():
+    return (
+        f"color: {_theme()['muted']}; font-size: 10px; font-weight: 700;"
+        " letter-spacing: 1px; background: transparent;"
+    )
 
 # Status marker prefixed to a PIPELINE step's label.
 _STATUS_MARKER = {
@@ -247,13 +250,13 @@ class Rail(QWidget):
         short horizontal dash (standard file-tree pattern).
         """
         trunk = QFrame()
-        trunk.setStyleSheet(_TREE_TRUNK_STYLE)
+        trunk.setStyleSheet(_tree_trunk_style())
         trunk_layout = QVBoxLayout(trunk)
         trunk_layout.setContentsMargins(12, 4, 0, 4)
         trunk_layout.setSpacing(2)
 
         label = QLabel(self)
-        label.setStyleSheet(_GROUP_LABEL_STYLE)
+        label.setStyleSheet(_group_label_style())
         label.setContentsMargins(6, 0, 0, 4)
         trunk_layout.addWidget(label)
         self._labels[spec["id"]] = (label, spec["label"])
@@ -267,7 +270,7 @@ class Rail(QWidget):
             row_layout.setSpacing(4)
             dash = QFrame()
             dash.setFixedSize(8, 1)
-            dash.setStyleSheet(_DASH_STYLE)
+            dash.setStyleSheet(_dash_style())
             row_layout.addWidget(dash)
             self._add_item(key, row_layout)
             trunk_layout.addWidget(row)
@@ -280,13 +283,13 @@ class Rail(QWidget):
         """
         self._layout.addSpacing(10)
         rule = QFrame()
-        rule.setStyleSheet(_SEPARATOR_STYLE)
+        rule.setStyleSheet(_separator_style())
         rule.setFixedHeight(1)
         self._layout.addWidget(rule)
         self._layout.addSpacing(6)
 
         label = QLabel(self)
-        label.setStyleSheet(_GROUP_LABEL_STYLE)
+        label.setStyleSheet(_group_label_style())
         label.setContentsMargins(20, 0, 0, 4)
         self._layout.addWidget(label)
         self._labels[spec["id"]] = (label, spec["label"])
@@ -318,7 +321,7 @@ class Rail(QWidget):
     # ── Step state ────────────────────────────────────────────────────────────
     def set_step_status(self, step: str, status: StepStatus):
         if step not in self._status:
-            raise KeyError(f"Étape inconnue: {step}")
+            raise KeyError(f"Unknown step: {step}")
         self._status[step] = StepStatus(status)
         self._refresh_step_label(step)
 

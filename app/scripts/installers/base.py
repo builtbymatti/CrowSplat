@@ -186,6 +186,88 @@ class DependencyManager:
             return False
         return answer in ("o", "y", "oui", "yes")
 
+    @staticmethod
+    def _run_install(engine: EngineDependency, fail_msg: str, ok_msg: str | None = None) -> bool:
+        """Runs engine.install() and reports the outcome.
+
+        install() reports most failures through a return value, not an exception
+        (cf. BrushInstaller._install_from_release, which prints its error and
+        returns False), so success is re-checked with is_installed() whenever
+        ok_msg is given. Without ok_msg, only exceptions are reported.
+        """
+        try:
+            engine.install()
+        except Exception as e:
+            print(f"{fail_msg}: {e}")
+            return False
+        if ok_msg is None:
+            return True
+        if engine.is_installed():
+            print(ok_msg)
+            return True
+        print(f"{fail_msg}.")
+        return False
+
+    def _handle_missing(self, name: str, engine: EngineDependency, enabled: bool, check_only: bool, startup: bool) -> bool:
+        """Installs (or skips) an engine that is not installed.
+        Returns True if the engine is still missing and must be reported."""
+        label = name.capitalize()
+        if check_only:
+            pass  # Just report status below
+        elif startup and not enabled:
+            # L6-02: a disabled engine is audited but never installed.
+            print(f"  ⏭️  {label}: disabled, not installed.")
+            return False
+        elif startup and not self._confirm_install(name):
+            print(f"  ⏭️  {label}: installation skipped.")
+            return False
+        elif startup:
+            print(f">>> Installing {label} on startup...")
+            if self._run_install(engine, f"❌ Auto-install failed for {name}", f"✅ {label} installed automatically."):
+                engine.on_startup_ready()
+        else:
+            print(f">>> Auto-installing missing engine [{name}]...")
+            self._run_install(engine, f"❌ Auto-install failed for {name}")
+
+        if engine.is_installed():
+            return False
+        if startup or check_only:
+            print(f"  ❌ {label}: Missing")
+        return True
+
+    def _handle_update(
+        self, name: str, engine: EngineDependency, config: dict, local: str, remote: str, check_only: bool, startup: bool
+    ) -> None:
+        """Handles an installed engine whose remote version differs from the local one."""
+        label = name.capitalize()
+        cfg_section = config.get("config", {})
+        auto_update = (
+            config.get(f"{name}_auto_update", engine.auto_update_default)
+            or cfg_section.get(f"{name}_auto_update", engine.auto_update_default)
+        )
+
+        if startup and auto_update and not engine.ask_before_update:
+            print(f">>> Auto-updating {label}...")
+            self._run_install(engine, f"❌ Auto-update failed for {name}", f"✅ {label} updated.")
+        elif startup:
+            # Without auto-update, startup reports the new version and lets the user
+            # decide; it used to fall through to the install-mode branch and update silently.
+            print(f"\n>>> Mise à jour disponible pour {label} ({local} → {remote})")
+            try:
+                answer = input("    Mettre à jour maintenant ? (o/n) : ").strip().lower()
+            except EOFError:
+                answer = "n"
+            if answer in ("o", "y", "oui", "yes"):
+                print(f">>> Mise à jour de {label}...")
+                self._run_install(engine, f"❌ Échec de la mise à jour de {name}", f"✅ {label} mis à jour.")
+            else:
+                print(f"    Mise à jour de {label} ignorée.")
+        elif check_only:
+            print(f"  ⚠️  {label}: Update available ({local} -> {remote})")
+        else:
+            print(f">>> Auto-updating {name} ({local} -> {remote})...")
+            self._run_install(engine, f"❌ Auto-update failed for {name}")
+
     def main_install(self, check_only=False, startup=False):
         from app.scripts.installers.tools import install_system_dependencies
 
@@ -209,92 +291,10 @@ class DependencyManager:
             local_clean = local.replace("-source", "") if local else local
 
             if not engine.is_installed():
-                if check_only:
-                    pass # Just report status later
-                elif startup and not enabled:
-                    # L6-02: a disabled engine is audited but never installed.
-                    print(f"  ⏭️  {name.capitalize()}: disabled, not installed.")
-                    continue
-                elif startup and not self._confirm_install(name):
-                    print(f"  ⏭️  {name.capitalize()}: installation skipped.")
-                    continue
-                elif startup:
-                    print(f">>> Installing {name.capitalize()} on startup...")
-                    try:
-                        engine.install()
-                        # install() reports its failures through a return value, not
-                        # an exception (cf. BrushInstaller._install_from_release, which
-                        # prints its error and returns False). Without checking again
-                        # here, a failure still printed "installed automatically",
-                        # right before the "❌ Missing" of the summary.
-                        if engine.is_installed():
-                            print(f"✅ {name.capitalize()} installed automatically.")
-                            engine.on_startup_ready()
-                        else:
-                            print(f"❌ Auto-install failed for {name}.")
-                    except Exception as e:
-                        print(f"❌ Auto-install failed for {name}: {e}")
-                else:
-                    print(f">>> Auto-installing missing engine [{name}]...")
-                    try:
-                        engine.install()
-                    except Exception as e:
-                        print(f"❌ Auto-install failed for {name}: {e}")
-
-                # Report status for check/startup
-                if not engine.is_installed():
-                    status = f"  ❌ {name.capitalize()}: Missing"
-                    if startup or check_only:
-                        print(status)
+                if self._handle_missing(name, engine, enabled, check_only, startup):
                     missing_engines_startup = True
-
             elif remote and local and remote != local_clean:
-                # Update Available
-
-                # Check Auto-Update Preference
-                cfg_section = config.get("config", {})
-                auto_update = (
-                    config.get(f"{name}_auto_update", engine.auto_update_default)
-                    or cfg_section.get(f"{name}_auto_update", engine.auto_update_default)
-                )
-
-                if startup and engine.ask_before_update:
-                    print(f"\n>>> Mise à jour disponible pour {name.capitalize()} ({local_clean} → {remote})")
-                    try:
-                        answer = input("    Mettre à jour maintenant ? (o/n) : ").strip().lower()
-                    except EOFError:
-                        answer = "n"
-                    if answer in ("o", "y", "oui", "yes"):
-                        print(f">>> Mise à jour de {name.capitalize()}...")
-                        try:
-                            engine.install()
-                            # install() reports most failures by returning, not raising.
-                            if engine.is_installed():
-                                print(f"✅ {name.capitalize()} mis à jour.")
-                            else:
-                                print(f"❌ Échec de la mise à jour de {name}.")
-                        except Exception as e:
-                            print(f"❌ Échec de la mise à jour de {name}: {e}")
-                    else:
-                        print(f"    Mise à jour de {name.capitalize()} ignorée.")
-                elif startup and auto_update:
-                     print(f">>> Auto-updating {name.capitalize()}...")
-                     try:
-                         engine.install()
-                         if engine.is_installed():
-                             print(f"✅ {name.capitalize()} updated.")
-                         else:
-                             print(f"❌ Auto-update failed for {name}.")
-                     except Exception as e:
-                         print(f"❌ Auto-update failed for {name}: {e}")
-                elif check_only:
-                     print(f"  ⚠️  {name.capitalize()}: Update available ({local_clean} -> {remote})")
-                else:
-                    print(f">>> Auto-updating {name} ({local_clean} -> {remote})...")
-                    try:
-                        engine.install()
-                    except Exception as e:
-                        print(f"❌ Auto-update failed for {name}: {e}")
+                self._handle_update(name, engine, config, local_clean, remote, check_only, startup)
             else:
                 if startup:
                     engine.on_startup_ready()

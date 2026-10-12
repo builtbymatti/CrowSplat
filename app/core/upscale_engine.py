@@ -49,7 +49,7 @@ class UpscaleEngine(BaseEngine):
         looks abundant.
         """
         if not self.is_installed():
-            self.log("upscayl-bin not found.")
+            self.log(tr("up_err_no_binary", "upscayl-bin not found."))
             return None
         # The model name is passed through untouched. There used to be a
         # substitution here that rewrote "x4" into the requested scale, so
@@ -75,15 +75,15 @@ class UpscaleEngine(BaseEngine):
             # Under high memory pressure, reduce tile to avoid swap
             if pressure > 80:
                 tile = max(128, tile // 2)
-                self.log(
-                    f"⚠️ Mémoire sous pression ({pressure}%) — "
-                    f"tile réduit à {tile}px pour éviter le swap."
-                )
+                self.log(tr(
+                    "up_log_memory_pressure",
+                    "⚠️ Memory under pressure ({pressure}%) - tile reduced to {tile}px to avoid swapping.",
+                ).format(pressure=pressure, tile=tile))
 
-            self.log(
-                f"🧠 {total_gb:.0f} Go RAM — tile adaptatif : {tile}px "
-                f"(pression mémoire: {pressure}%)"
-            )
+            self.log(tr(
+                "up_log_adaptive_tile",
+                "🧠 {gb:.0f} GB RAM - adaptive tile: {tile}px (memory pressure: {pressure}%)",
+            ).format(gb=total_gb, tile=tile, pressure=pressure))
 
         return {
             "model_id": model_id, "scale": scale,
@@ -100,16 +100,12 @@ class UpscaleEngine(BaseEngine):
             return False
         safe_in = self.validate_path(input_path)
         if safe_in is None:
-            self.log(f"Invalid input path: {input_path}")
+            self.log(tr("log_invalid_input_path", "SECURITY: Invalid input path: {name}").format(name=input_path))
             return False
         safe_out = self.validate_path(output_path)
         if safe_out is None:
-            out_parent = Path(output_path).parent
-            safe_parent = self.validate_path(str(out_parent))
-            if safe_parent is None:
-                self.log(f"Invalid output path: {output_path}")
-                return False
-            safe_out = safe_parent / Path(output_path).name
+            self.log(tr("log_invalid_output_path", "SECURITY: Invalid output path: {name}").format(name=output_path))
+            return False
         with tempfile.TemporaryDirectory() as tmp_in:
             shutil.copy2(safe_in, Path(tmp_in) / safe_in.name)
             safe_out.parent.mkdir(parents=True, exist_ok=True)
@@ -126,20 +122,16 @@ class UpscaleEngine(BaseEngine):
                        compression=0, custom_scale=None,
                        cancel_check=None) -> tuple:
         if not model_id:
-            return False, "No model selected."
+            return False, tr("up_err_no_model", "No model selected.")
         # Validate paths
         safe_in = self.validate_path(input_dir)
-        safe_out = self.validate_path(output_dir) or (Path(output_dir).parent if self.validate_path(str(Path(output_dir).parent)) else None)
+        safe_out = self.validate_path(output_dir)
         if safe_in is None:
-            self.log(f"Invalid input directory: {input_dir}")
-            return False, "Chemin d'entrée non autorisé."
+            self.log(tr("log_invalid_input_dir", "SECURITY: Invalid input directory: {name}").format(name=input_dir))
+            return False, tr("up_err_input_path", "Input path not allowed.")
         if safe_out is None:
-            out_parent = Path(output_dir).parent
-            safe_parent = self.validate_path(str(out_parent))
-            if safe_parent is None:
-                self.log(f"Invalid output directory: {output_dir}")
-                return False, "Chemin de sortie non autorisé."
-            safe_out = safe_parent / Path(output_dir).name
+            self.log(tr("log_invalid_output_dir", "SECURITY: Invalid output directory: {name}").format(name=output_dir))
+            return False, tr("up_err_output_path", "Output path not allowed.")
         from app.upscayl_manager import run_upscayl
         params = {
             "model_id":    model_id,
@@ -154,7 +146,9 @@ class UpscaleEngine(BaseEngine):
                     log_callback=self.log,
                     done_callback=lambda ok: result.__setitem__(0, ok),
                     cancel_check=cancel_check)
-        return result[0], "Upscale complete." if result[0] else "Upscale failed."
+        if result[0]:
+            return True, tr("up_msg_complete", "Upscale complete.")
+        return False, tr("up_err_failed", "Upscale failed.")
 
 
 def run_upscale_job(input_path, output_dir, params, log_callback, cancel_check):

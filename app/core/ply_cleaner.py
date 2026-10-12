@@ -165,7 +165,7 @@ def clean_ply(input_path, output_path, strength="medium", overrides=None, log=No
     safe_in = _validate_path(input_path)
     if safe_in is None:
         raise ValueError(f"Chemin d'entrée non autorisé: {input_path}")
-    safe_out = _validate_path(output_path) or _validate_path(str(Path(output_path).parent))
+    safe_out = _validate_path(output_path)
     if safe_out is None:
         raise ValueError(f"Chemin de sortie non autorisé: {output_path}")
     input_path = safe_in
@@ -235,6 +235,34 @@ def _write_atomically(ply_data, output_path):
         raise
 
 
+def _clean_one_file(ply_path, input_dir, output_dir, strength, overrides, log, cancel_check):
+    """Clean one file of a batch, mirroring its sub-folder under ``output_dir``.
+
+    Returns the file's stats dictionary, an ``{"file", "error"}`` entry when
+    the file was skipped or failed, or None when the run was cancelled.
+    """
+    out_path = output_dir / ply_path.relative_to(input_dir)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        stats = clean_ply(ply_path, out_path, strength=strength, overrides=overrides, log=log,
+                          cancel_check=cancel_check)
+        stats["file"] = str(ply_path.name)
+        return stats
+    except CleaningCancelled:
+        if log:
+            log("Nettoyage annulé par l'utilisateur.")
+        return None
+    except ValueError as e:
+        if log:
+            log(f"⚠️  {ply_path.name}: ignoré ({e})")
+        return {"file": str(ply_path.name), "error": str(e)}
+    except Exception as e:
+        if log:
+            log(f"❌  {ply_path.name}: erreur ({e})")
+        return {"file": str(ply_path.name), "error": str(e)}
+
+
 def clean_ply_batch(input_dir, output_dir, strength="medium", overrides=None, log=None, recursive=False,
                     cancel_check=None):
     """Clean every .ply file in a folder.
@@ -249,7 +277,7 @@ def clean_ply_batch(input_dir, output_dir, strength="medium", overrides=None, lo
       when it returns True the run stops and the stats gathered so far are returned
     """
     safe_in = _validate_path(input_dir)
-    safe_out = _validate_path(output_dir) or _validate_path(str(Path(output_dir).parent))
+    safe_out = _validate_path(output_dir)
     if safe_in is None:
         raise ValueError(f"Chemin d'entrée non autorisé: {input_dir}")
     if safe_out is None:
@@ -277,27 +305,10 @@ def clean_ply_batch(input_dir, output_dir, strength="medium", overrides=None, lo
                 log("Nettoyage annulé par l'utilisateur.")
             break
 
-        rel = ply_path.relative_to(input_dir)
-        out_path = output_dir / rel
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            stats = clean_ply(ply_path, out_path, strength=strength, overrides=overrides, log=log,
-                              cancel_check=cancel_check)
-            stats["file"] = str(ply_path.name)
-            all_stats.append(stats)
-        except CleaningCancelled:
-            if log:
-                log("Nettoyage annulé par l'utilisateur.")
+        stats = _clean_one_file(ply_path, input_dir, output_dir, strength, overrides, log, cancel_check)
+        if stats is None:  # cancelled mid-file
             break
-        except ValueError as e:
-            if log:
-                log(f"⚠️  {ply_path.name}: ignoré ({e})")
-            all_stats.append({"file": str(ply_path.name), "error": str(e)})
-        except Exception as e:
-            if log:
-                log(f"❌  {ply_path.name}: erreur ({e})")
-            all_stats.append({"file": str(ply_path.name), "error": str(e)})
+        all_stats.append(stats)
 
     if log:
         success = sum(1 for s in all_stats if "error" not in s)

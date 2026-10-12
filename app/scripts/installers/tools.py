@@ -28,39 +28,6 @@ def relax_requirements(src, dst):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Version helpers (standalone functions)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_remote_version(repo_url):
-    """Gets the latest commit hash from the remote git repository"""
-    try:
-        output = subprocess.check_output(["git", "ls-remote", repo_url, "HEAD"], text=True, timeout=10).strip()
-        if output:
-            return output.split()[0]
-    except Exception as e:
-        print(f"Attention: Impossible de verifier la version distante pour {repo_url}: {e}")
-    return None
-
-
-def get_local_version(version_file: Path):
-    if version_file.exists():
-        try:
-            return version_file.read_text().strip()
-        except OSError:
-            pass
-    return None
-
-
-def save_local_version(version_file: Path, version):
-    if version:
-        try:
-            version_file.parent.mkdir(parents=True, exist_ok=True)
-            version_file.write_text(version)
-        except Exception as e:
-            print(f"Attention: Impossible d'enregistrer la version locale: {e}")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Checkers
 # ─────────────────────────────────────────────────────────────────────────────
 

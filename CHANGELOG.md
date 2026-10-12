@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-12
+
+Code-quality release: closes the v2026.1 audit (45 major and 137 minor
+findings reviewed, all fixed except a few kept on purpose or awaiting a
+product decision), extracts pipeline orchestration out of the main window,
+and finishes the translation of engine and CLI messages.
+
+### ✨ Added
+- **Brush options per build mode.** Two checkable groups in the training panel, shown according to the selected build: "Release options (0.3.0)" and "Git build options". Unchecked group = nothing sent; only the active mode's values reach Brush. The extra-arguments field accepts the flags of the selected build only, and its tooltip lists them.
+- **"Eval every N steps" spinbox** in the Checkpoints group (`eval_every`, 0 = never).
+- **`LOG_LEVEL` environment variable** to set the log verbosity.
+
+### 🔄 Changed
+- **Startup update check asks before updating.** An engine with a newer version and auto-update disabled was updated silently; it now reports the new version and asks (no answer means no).
+- **Full translation of engine and CLI messages.** COLMAP, Brush, Sharp, 4DGS, 360 extraction, Upscale, Export and every CLI subcommand now speak the selected language (about 230 new keys across the 9 locales).
+- **Arabic (right-to-left) layout**: the side rail now mirrors its alignment, borders and indentation.
+- **Pipeline orchestration moved out of the main window** into `app/gui/pipeline_orchestrator.py`, with a step registry: adding a step no longer means editing the window. The window shrinks from ~1790 to ~1250 lines; behaviour is unchanged.
+- Brush presets, Sharp pre-upscale and Upscale logic moved into `app/core/`, shared by the interface and the CLI.
+- `config.json`, presets and settings are written atomically (no half-written file after a crash).
+
+### ⚡ Performance
+- **No more interface freezes** while SuperSplat starts, while a video's range is probed or extracted, or while dependencies are set up before a restart: all run in the background.
+- Upscale model downloads are streamed instead of loaded in memory.
+
+### 🐛 Fixed
+- **Export `scale` setting is now honoured** (it was silently ignored).
+- **Upscale could fall back to the parent folder** of an invalid path; it now stops with an error. Same misleading fallbacks removed from Cleaning, Sharp, 360 extraction and 4DGS.
+- Brush flags that no Brush version knows (`--save-iterations`, `--refine-pose`, `--log-level`, `--test-split`) are no longer offered; old presets still load.
+- A project named `..` is refused.
+- `clean --then_export` now reports an export failure instead of exiting successfully.
+- Ctrl+C in the CLI exits with code 130; numeric CLI arguments are range-checked.
+- COLMAP checks its binary exists before running; the dependency check no longer reports a phantom `glomap` binary.
+- Factory reset now also resets the 4DGS environment (`.venv_4dgs`).
+- `CorbeauSplat.command` works when double-clicked and uses a safe temporary file.
+
+### 🔒 Security
+- SuperSplat local viewer protected against DNS rebinding; loaded file URLs are encoded.
+- User paths are redacted in logs.
+
 ## [2.0.1] - 2026-10-07
 
 Maintenance release: closes the minor backlog left by the 2.0.0 audit and

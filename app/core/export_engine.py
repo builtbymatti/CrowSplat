@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .base_engine import BaseEngine
+from .i18n import tr
 
 # Degree-0 spherical harmonics coefficient. Brush/3DGS PLY files store colour as
 # SH rather than red/green/blue, and rgb = 0.5 + SH_C0 * f_dc is the standard
@@ -100,7 +101,10 @@ class ExportEngine(BaseEngine):
         output_format: str
             Target format (glb, obj, ply, xyz).
         scale: float
-            Scale factor for export.
+            Scale factor for export (OBJ only). Overridden by ``options["scale"]``
+            when both are given.
+        options: dict, optional
+            Format-specific options.
 
         Returns
         -------
@@ -109,30 +113,36 @@ class ExportEngine(BaseEngine):
         """
         safe_input = self.validate_path(input_path)
         if safe_input is None:
-            self.log(f"Erreur: chemin d'entrée refusé {input_path}")
+            self.log(tr("exp_log_input_rejected", "Error: input path rejected: {path}").format(path=input_path))
             return False
         safe_output = self.validate_path(output_path)
         if safe_output is None:
-            self.log(f"Erreur: chemin de sortie refusé {output_path}")
+            self.log(tr("exp_log_output_rejected", "Error: output path rejected: {path}").format(path=output_path))
             return False
 
         input_file = Path(safe_input)
         output_dir = Path(safe_output)
 
         if not input_file.exists():
-            self.log(f"Erreur: fichier introuvable {input_file}")
+            self.log(tr("exp_log_file_not_found", "Error: file not found: {path}").format(path=input_file))
             return False
 
         # Fail before doing any work, so a missing backend is reported up front
         # rather than after the conversion has run.
         missing = self.missing_dependency(output_format)
         if missing:
-            self.log(f"Erreur: export {output_format} indisponible — dépendance manquante : {missing}")
+            self.log(tr(
+                "exp_log_missing_dependency",
+                "Error: {fmt} export unavailable - missing dependency: {dep}",
+            ).format(fmt=output_format, dep=missing))
             return False
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        opts = options or {}
+        # The explicit ``scale`` argument feeds the options so it is actually
+        # read (by _export_obj); an ``options["scale"]`` entry takes precedence.
+        opts = dict(options or {})
+        opts.setdefault("scale", scale)
         if output_format == "ply":
             return self._export_ply(input_file, output_dir, opts)
         elif output_format == "xyz":
@@ -144,7 +154,7 @@ class ExportEngine(BaseEngine):
         elif output_format == "spz":
             return self._export_spz(input_file, output_dir, opts)
         else:
-            self.log(f"Format non supporté: {output_format}")
+            self.log(tr("exp_log_unsupported_format", "Unsupported format: {fmt}").format(fmt=output_format))
             return False
 
     def _export_ply(self, input_file: Path, output_dir: Path, opts: dict) -> bool:
@@ -160,20 +170,21 @@ class ExportEngine(BaseEngine):
                 output_file = output_dir / (input_file.name + '.gz')
                 with open(input_file, 'rb') as f_in, gzip.open(output_file, 'wb') as f_out:
                     shutil.copyfileobj(f_in, f_out)
-                self.log(f"Compressé: {output_file}")
+                self.log(tr("exp_log_compressed", "Compressed: {path}").format(path=output_file))
                 return True
             else:
                 if input_file.resolve() == output_file.resolve():
-                    self.log(
-                        f"Export PLY ignoré : la source et la destination sont le même "
-                        f"fichier ({output_file}). Choisissez un autre dossier de sortie."
-                    )
+                    self.log(tr(
+                        "exp_log_same_file",
+                        "PLY export skipped: source and destination are the same file "
+                        "({path}). Choose a different output folder.",
+                    ).format(path=output_file))
                     return False
                 shutil.copy2(input_file, output_file)
-                self.log(f"Copié: {output_file}")
+                self.log(tr("exp_log_copied", "Copied: {path}").format(path=output_file))
                 return True
         except Exception as e:
-            self.log(f"Erreur: {e}")
+            self.log(tr("exp_log_error", "Error: {err}").format(err=e))
             return False
 
     def _export_ply_ascii(self, input_file: Path, output_file: Path) -> bool:
@@ -186,13 +197,13 @@ class ExportEngine(BaseEngine):
                 # previous ply.write(..., text=True) raised TypeError every
                 # single time, swallowed by the except below.
                 PlyData(ply.elements, text=True).write(str(output_file))
-                self.log(f"Exporté PLY ASCII: {output_file}")
+                self.log(tr("exp_log_ascii_done", "ASCII PLY exported: {path}").format(path=output_file))
                 return True
             except ImportError:
-                self.log("plyfile requis pour conversion ASCII. pip install plyfile")
+                self.log(tr("exp_log_plyfile_required", "plyfile is required for ASCII conversion. pip install plyfile"))
                 return False
         except Exception as e:
-            self.log(f"Erreur conversion PLY ASCII: {e}")
+            self.log(tr("exp_log_ascii_error", "ASCII PLY conversion error: {err}").format(err=e))
             return False
 
     def _export_xyz(self, input_file: Path, output_dir: Path, opts: dict) -> bool:
@@ -208,7 +219,7 @@ class ExportEngine(BaseEngine):
             vertex = ply['vertex']
             colors = _extract_colors(vertex) if include_colors else None
             if include_colors and colors is None:
-                self.log("Avertissement: aucune couleur dans ce PLY, export XYZ en géométrie seule.")
+                self.log(tr("exp_log_no_colors", "Warning: no colors in this PLY, {fmt} export is geometry only.").format(fmt="XYZ"))
 
             # Column access plus a single write pass: going through vertex[i]
             # costs orders of magnitude more on a splat of several million
@@ -222,10 +233,13 @@ class ExportEngine(BaseEngine):
             with open(output_file, 'w') as fout:
                 np.savetxt(fout, np.column_stack(cols), fmt=fmt, delimiter=delimiter)
 
-            self.log(f"Exporté XYZ{' (avec couleurs)' if include_colors else ''}: {output_file}")
+            if include_colors:
+                self.log(tr("exp_log_xyz_done_colors", "XYZ exported (with colors): {path}").format(path=output_file))
+            else:
+                self.log(tr("exp_log_xyz_done", "XYZ exported: {path}").format(path=output_file))
             return True
         except Exception as e:
-            self.log(f"Erreur export XYZ: {e}")
+            self.log(tr("exp_log_xyz_error", "XYZ export error: {err}").format(err=e))
             return False
 
     def _export_obj(self, input_file: Path, output_dir: Path, opts: dict) -> bool:
@@ -242,7 +256,7 @@ class ExportEngine(BaseEngine):
             vertex = ply['vertex']
             colors = _extract_colors(vertex) if include_colors else None
             if include_colors and colors is None:
-                self.log("Avertissement: aucune couleur dans ce PLY, export OBJ en géométrie seule.")
+                self.log(tr("exp_log_no_colors", "Warning: no colors in this PLY, {fmt} export is geometry only.").format(fmt="OBJ"))
 
             if include_mtl:
                 mtl_file = output_dir / f"{input_file.stem}.mtl"
@@ -272,10 +286,13 @@ class ExportEngine(BaseEngine):
                 np.savetxt(fout, np.column_stack(cols), fmt=row_fmt)
                 fout.write(f"\n# {len(vertex)} vertices\n")
 
-            self.log(f"Exporté OBJ: {output_file}" + (f" + {mtl_file}" if include_mtl else ""))
+            if include_mtl:
+                self.log(tr("exp_log_obj_done_mtl", "OBJ exported: {path} + {mtl}").format(path=output_file, mtl=mtl_file))
+            else:
+                self.log(tr("exp_log_obj_done", "OBJ exported: {path}").format(path=output_file))
             return True
         except Exception as e:
-            self.log(f"Erreur export OBJ: {e}")
+            self.log(tr("exp_log_obj_error", "OBJ export error: {err}").format(err=e))
             return False
 
     def _export_glb(self, input_file: Path, output_dir: Path, opts: dict) -> bool:
@@ -302,7 +319,7 @@ class ExportEngine(BaseEngine):
             if self._try_export_glb_assimp(input_file, output_file, opts):
                 return True
 
-        self.log("GLB export failed. Install: pip install trimesh open3d")
+        self.log(tr("exp_log_glb_failed", "GLB export failed. Install: pip install trimesh open3d"))
         return False
 
     def _try_export_glb_trimesh(self, input_file: Path, output_file: Path, opts: dict) -> bool:
@@ -321,19 +338,19 @@ class ExportEngine(BaseEngine):
 
             colors = _extract_colors(vertex)
             if colors is None:
-                self.log("Avertissement: aucune couleur dans ce PLY, export GLB en géométrie seule.")
+                self.log(tr("exp_log_no_colors", "Warning: no colors in this PLY, {fmt} export is geometry only.").format(fmt="GLB"))
 
             # Create point cloud
             cloud = trimesh.PointCloud(vertices=points, colors=colors)
 
             # Export as GLB
             cloud.export(str(output_file))
-            self.log(f"Exporté GLB via trimesh: {output_file}")
+            self.log(tr("exp_log_glb_trimesh_done", "GLB exported via trimesh: {path}").format(path=output_file))
             return True
         except ImportError:
             return False
         except Exception as e:
-            self.log(f"Erreur trimesh GLB: {e}")
+            self.log(tr("exp_log_glb_trimesh_error", "trimesh GLB error: {err}").format(err=e))
             return False
 
     def _try_export_glb_open3d(self, input_file: Path, output_file: Path, opts: dict) -> bool:
@@ -355,12 +372,12 @@ class ExportEngine(BaseEngine):
                     return False
                 scene = trimesh.load(str(temp_ply))
                 scene.export(str(output_file))
-            self.log(f"Exporté GLB via open3d+trimesh: {output_file}")
+            self.log(tr("exp_log_glb_open3d_done", "GLB exported via open3d+trimesh: {path}").format(path=output_file))
             return True
         except ImportError:
             return False
         except Exception as e:
-            self.log(f"Erreur open3d GLB: {e}")
+            self.log(tr("exp_log_glb_open3d_error", "open3d GLB error: {err}").format(err=e))
             return False
 
     def _try_export_glb_assimp(self, input_file: Path, output_file: Path, opts: dict) -> bool:
@@ -401,10 +418,10 @@ class ExportEngine(BaseEngine):
 
                 if not self._convert_obj_to_glb(temp_obj, output_file):
                     return False
-            self.log(f"Exporté GLB via assimp: {output_file}")
+            self.log(tr("exp_log_glb_assimp_done", "GLB exported via assimp: {path}").format(path=output_file))
             return True
         except Exception as e:
-            self.log(f"Erreur assimp GLB: {e}")
+            self.log(tr("exp_log_glb_assimp_error", "assimp GLB error: {err}").format(err=e))
             return False
 
     def _export_spz(self, input_file: Path, output_dir: Path, opts: dict) -> bool:
@@ -422,10 +439,11 @@ class ExportEngine(BaseEngine):
         try:
             import spz
         except ImportError:
-            self.log(
-                "Erreur export SPZ: la bibliothèque 'spz' (nianticlabs/spz) n'est pas installée. "
-                "Relancez l'installateur de dépendances (setup_dependencies.py) pour la compiler."
-            )
+            self.log(tr(
+                "exp_log_spz_missing",
+                "SPZ export error: the 'spz' library (nianticlabs/spz) is not installed. "
+                "Run the dependency installer (setup_dependencies.py) again to build it.",
+            ))
             return False
 
         try:
@@ -440,14 +458,14 @@ class ExportEngine(BaseEngine):
 
             ok = spz.save_spz(cloud, pack_opts, str(output_file))
             if not ok:
-                self.log("Erreur export SPZ: save_spz a retourné False")
+                self.log(tr("exp_log_spz_save_failed", "SPZ export error: save_spz returned False"))
                 return False
 
-            self.log(f"Exporté SPZ: {output_file} ({cloud.num_points} points)")
+            self.log(tr("exp_log_spz_done", "SPZ exported: {path} ({n} points)").format(path=output_file, n=cloud.num_points))
             return True
 
         except Exception as e:
-            self.log(f"Erreur export SPZ: {e}")
+            self.log(tr("exp_log_spz_error", "SPZ export error: {err}").format(err=e))
             return False
 
     def _convert_obj_to_glb(self, obj_file: Path, glb_file: Path) -> bool:
@@ -461,11 +479,12 @@ class ExportEngine(BaseEngine):
                 )
                 return True
             except subprocess.TimeoutExpired:
-                self.log(
-                    f"Assimp n'a pas répondu en {ASSIMP_TIMEOUT_SECONDS} s, conversion abandonnée."
-                )
+                self.log(tr(
+                    "exp_log_assimp_timeout",
+                    "assimp did not respond within {secs} s, conversion abandoned.",
+                ).format(secs=ASSIMP_TIMEOUT_SECONDS))
             except Exception as e:
-                self.log(f"Assimp export failed: {e}")
+                self.log(tr("exp_log_assimp_failed", "assimp export failed: {err}").format(err=e))
 
         blender = shutil.which("blender")
         if blender:
@@ -490,7 +509,7 @@ class ExportEngine(BaseEngine):
                 )
                 return True
             except Exception as e:
-                self.log(f"Blender export failed: {e}")
+                self.log(tr("exp_log_blender_failed", "Blender export failed: {err}").format(err=e))
             finally:
                 if tmp_path:
                     Path(tmp_path).unlink(missing_ok=True)

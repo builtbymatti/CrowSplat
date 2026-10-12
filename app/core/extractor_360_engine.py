@@ -1,22 +1,41 @@
 import logging
 import os
+import sys
 from pathlib import Path
-
-from app.scripts.setup_dependencies import (
-    get_venv_360_python,
-    install_extractor_360,
-    resolve_project_root,
-    uninstall_extractor_360,
-)
 
 from .base_engine import BaseEngine
 from .i18n import tr
-from .system import compute_env
+from .system import compute_env, resolve_project_root
 
 logger = logging.getLogger(__name__)
 
 
+def get_venv_360_python():
+    """Path to the Python executable of the dedicated ``.venv_360`` environment."""
+    root = resolve_project_root()
+    if sys.platform == "win32":
+        return root / ".venv_360" / "Scripts" / "python.exe"
+    return root / ".venv_360" / "bin" / "python"
+
+
+# Plain "--flag value" parameters: params key -> CLI flag.
+_VALUE_FLAGS = (
+    ("interval", "--interval"),
+    ("format", "--format"),
+    ("resolution", "--resolution"),
+    ("camera_count", "--camera-count"),
+    ("quality", "--quality"),
+    ("layout", "--layout"),
+)
+
+
 class Extractor360Engine(BaseEngine):
+    """Runs the 360Extractor CLI from its dedicated venv.
+
+    Installation and removal are handled by ``Extractor360EngineDep`` (see
+    ``app.scripts.installers.extractor_360``), not by the runtime engine.
+    """
+
     def __init__(self, logger_callback=None):
         super().__init__("360Extractor", logger_callback)
         self.root_dir = Path(resolve_project_root())
@@ -29,70 +48,18 @@ class Extractor360Engine(BaseEngine):
         """Checks if venv and script exist"""
         return self.venv_python.exists() and self.script_path.exists()
 
-    def install(self):
-        """Installs via setup_dependencies"""
-        install_extractor_360()
-
-    def uninstall(self):
-        """Uninstalls"""
-        uninstall_extractor_360()
-
-    def run_extraction(self, input_path, output_dir, params, progress_callback=None, log_callback=None, status_callback=None, check_cancel_callback=None):
-        """
-        Runs the extraction CLI.
-        params: dict of arguments mirroring CLI args
-        """
-        if status_callback:
-            status_callback(tr("status_extracting_360", "Extraction vidéo 360°..."))
-        if not self.is_installed():
-            if log_callback:
-                log_callback("Error: 360Extractor not installed.")
-            return False
-
-        safe_in = self.validate_path(input_path)
-        safe_out = self.validate_path(output_dir) or self.validate_path(str(Path(output_dir).parent))
-        if safe_in is None:
-            if log_callback:
-                log_callback(f"SECURITY: Invalid input path: {os.path.basename(str(input_path))}")
-                logger.debug("Invalid input path: %s", input_path)
-            return False
-        if safe_out is None:
-            if log_callback:
-                log_callback(f"SECURITY: Invalid output directory: {os.path.basename(str(output_dir))}")
-                logger.debug("Invalid output directory: %s", output_dir)
-            return False
-
+    def _build_cmd(self, safe_in, safe_out, params):
+        """Assemble the CLI argv, mapping ``params`` onto the extractor's flags."""
         cmd = [
             self.venv_python,
             self.script_path,
             "--input", str(safe_in),
-            "--output", str(safe_out if isinstance(safe_out, Path) else output_dir)
+            "--output", str(safe_out),
         ]
 
-        # Map params to CLI args
-        # interval
-        if "interval" in params:
-            cmd.extend(["--interval", str(params["interval"])])
-
-        # format
-        if "format" in params:
-            cmd.extend(["--format", params["format"]])
-
-        # resolution
-        if "resolution" in params:
-            cmd.extend(["--resolution", str(params["resolution"])])
-
-        # camera-count
-        if "camera_count" in params:
-            cmd.extend(["--camera-count", str(params["camera_count"])])
-
-        # quality
-        if "quality" in params:
-            cmd.extend(["--quality", str(params["quality"])])
-
-        # layout
-        if "layout" in params:
-            cmd.extend(["--layout", params["layout"]])
+        for key, flag in _VALUE_FLAGS:
+            if key in params:
+                cmd.extend([flag, str(params[key])])
 
         # AI options
         if params.get("ai_mask", False):
@@ -105,6 +72,36 @@ class Extractor360Engine(BaseEngine):
             cmd.append("--adaptive")
             if "motion_threshold" in params:
                 cmd.extend(["--motion-threshold", str(params["motion_threshold"])])
+        return cmd
+
+    def run_extraction(self, input_path, output_dir, params, progress_callback=None, log_callback=None, status_callback=None, check_cancel_callback=None):
+        """
+        Runs the extraction CLI.
+        params: dict of arguments mirroring CLI args
+        """
+        if status_callback:
+            status_callback(tr("status_extracting_360", "Extracting 360 images..."))
+        if not self.is_installed():
+            if log_callback:
+                log_callback(tr("x360_log_not_installed", "Error: 360Extractor not installed."))
+            return False
+
+        safe_in = self.validate_path(input_path)
+        safe_out = self.validate_path(output_dir)
+        if safe_in is None:
+            if log_callback:
+                log_callback(tr("log_invalid_input_path", "SECURITY: Invalid input path: {name}").format(
+                    name=os.path.basename(str(input_path))))
+                logger.debug("Invalid input path: %s", input_path)
+            return False
+        if safe_out is None:
+            if log_callback:
+                log_callback(tr("log_invalid_output_dir", "SECURITY: Invalid output directory: {name}").format(
+                    name=os.path.basename(str(output_dir))))
+                logger.debug("Invalid output directory: %s", output_dir)
+            return False
+
+        cmd = self._build_cmd(safe_in, safe_out, params)
 
         if log_callback:
             # Use map(str, ...) to handle Path objects in the list
@@ -132,15 +129,15 @@ class Extractor360Engine(BaseEngine):
                     pass
 
         if status_callback:
-            status_callback(tr("status_extracting_360", "Extraction vidéo 360°..."))
+            status_callback(tr("status_extracting_360", "Extracting 360 images..."))
 
         returncode = self._execute_command(cmd_str, env=env, cwd=str(self.extractor_dir), line_callback=line_handler)
 
         if check_cancel_callback and check_cancel_callback():
             if log_callback:
-                log_callback("Processus arrêté par l'utilisateur.")
+                log_callback(tr("x360_log_stopped", "Process stopped by user."))
             return False
 
         if status_callback and returncode == 0:
-            status_callback(tr("status_ready", "Traitement terminé !"))
+            status_callback(tr("status_ready", "Ready"))
         return returncode == 0

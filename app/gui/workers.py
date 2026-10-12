@@ -3,6 +3,7 @@ import shutil
 import threading
 import time
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QMutex, QMutexLocker, QThread, QWaitCondition, Signal
@@ -13,7 +14,7 @@ from app.core.brush_refine import (
     detect_refine_start_iteration,
     prepare_refine_environment,
 )
-from app.core.engine import ColmapEngine
+from app.core.engine import ColmapCallbacks, ColmapEngine
 from app.core.extractor_360_engine import Extractor360Engine
 from app.core.four_dgs_engine import FourDGSEngine
 from app.core.i18n import tr
@@ -77,21 +78,48 @@ class Extractor360Worker(BaseWorker):
             except (ValueError, IndexError):
                 pass
 
-class ColmapWorker(BaseWorker):
-    """Thread worker for running COLMAP through the engine"""
+@dataclass
+class ColmapJob:
+    """Everything a :class:`ColmapWorker` needs to build its engine."""
 
-    def __init__(self, params, input_path, output_path, input_type, fps, project_name="Untitled", upscale_params=None, engine=None):
+    params: object
+    input_path: str
+    output_path: str
+    input_type: str
+    fps: int
+    project_name: str = "Untitled"
+    upscale_params: dict | None = None
+
+
+class ColmapWorker(BaseWorker):
+    """Thread worker for running COLMAP through the engine.
+
+    Takes a :class:`ColmapJob`. The legacy positional form
+    ``ColmapWorker(params, input_path, output_path, input_type, fps, ...)``
+    is still accepted and converted to a job.
+    """
+
+    def __init__(self, job=None, *legacy_args, engine=None, **legacy_kwargs):
         super().__init__()
-        self.upscale_params = upscale_params
+        if job is None:
+            job = ColmapJob(*legacy_args, **legacy_kwargs)
+        elif not isinstance(job, ColmapJob):
+            job = ColmapJob(job, *legacy_args, **legacy_kwargs)
+        elif legacy_args or legacy_kwargs:
+            raise TypeError("ColmapWorker(job) takes no extra job arguments")
+        self.job = job
+        self.upscale_params = job.upscale_params
         # DIP: Injection
         self.engine = engine or ColmapEngine(
-            params, input_path, output_path, input_type, fps, project_name,
-            logger_callback=self.log_signal.emit,
-            progress_callback=self.progress_signal.emit,
-            status_callback=self.status_signal.emit,
-            check_cancel_callback=self.isInterruptionRequested
+            job.params, job.input_path, job.output_path, job.input_type, job.fps,
+            job.project_name,
+            ColmapCallbacks(
+                logger=self.log_signal.emit,
+                progress=self.progress_signal.emit,
+                status=self.status_signal.emit,
+                check_cancel=self.isInterruptionRequested,
+            ),
         )
-
 
     def stop(self):
         self.engine.stop()
@@ -209,11 +237,11 @@ class BrushWorker(BaseWorker):
             self.finished_signal.emit(False, str(e))
             return None
 
-        if isinstance(result, Path):
-            # No checkpoint found: refine mode is a no-op.
-            return result
-
         refine_dir, latest_ply = result
+        if latest_ply is None:
+            # No checkpoint found: refine mode is a no-op.
+            return refine_dir
+
         self.output_path = refine_dir / "checkpoints"
         self.output_path.mkdir(parents=True, exist_ok=True)
         self.log_signal.emit(f"Dossier de travail redirigé vers: {refine_dir}")

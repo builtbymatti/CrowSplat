@@ -1,6 +1,6 @@
 # Kept identical to pyproject.toml's version; the bottom bar shows
 # f"v{VERSION}" (AppBar).
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 
 # Size the in-process NumPy/Accelerate thread pools (PLY cleaning) to the
 # P-cores. These variables are only read when NumPy first loads, so they must

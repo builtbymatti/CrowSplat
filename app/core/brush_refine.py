@@ -43,7 +43,7 @@ def find_latest_checkpoint(
 def prepare_refine_environment(
     resolved_input: Path,
     log: Callable[[str], None] = lambda _msg: None,
-) -> tuple[Path, Path] | Path:
+) -> tuple[Path, Path | None]:
     """Build the ``Refine`` folder and redirect training into it.
 
     Locates the most recently modified checkpoint under
@@ -60,10 +60,10 @@ def prepare_refine_environment(
 
     Returns
     -------
-    ``(refine_dir, latest_checkpoint)`` when a checkpoint was found and the
-    Refine folder was built successfully. ``resolved_input`` unchanged when
-    no checkpoint exists under ``checkpoints/`` — refine mode is then a
-    no-op and the caller should train normally.
+    Always a tuple. ``(refine_dir, latest_checkpoint)`` when a checkpoint was
+    found and the Refine folder was built successfully. ``(resolved_input,
+    None)`` when no checkpoint exists under ``checkpoints/`` — refine mode is
+    then a no-op and the caller should train normally.
 
     Raises
     ------
@@ -79,7 +79,7 @@ def prepare_refine_environment(
             "AVERTISSEMENT: Mode Refine activé mais aucun checkpoint (.ply) trouvé. "
             "Lancement mode normal."
         )
-        return resolved_input
+        return resolved_input, None
 
     log(f"Checkpoint trouvé: {latest_ply.name}")
 
@@ -89,7 +89,7 @@ def prepare_refine_environment(
         if refine_dir.exists():
             shutil.rmtree(refine_dir)
         refine_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
+    except OSError as e:  # shutil.Error is an OSError subclass
         log(f"ERREUR lors de la préparation du dossier Refine: {e}")
         raise RefineEnvironmentError(f"Erreur dossier Refine: {e}") from e
 
@@ -97,7 +97,7 @@ def prepare_refine_environment(
     try:
         shutil.copy2(latest_ply, dest_init)
         log(f"Copié {latest_ply.name} vers {dest_init}")
-    except Exception as e:
+    except OSError as e:  # shutil.Error is an OSError subclass
         log(f"ERREUR lors de la copie de init.ply: {e}")
         raise RefineEnvironmentError(f"Erreur copie init.ply: {e}") from e
 
@@ -110,7 +110,7 @@ def prepare_refine_environment(
                 log(f"Symlink {name} échoué ({e}), tentative copie (plus lent)...")
                 shutil.copytree(resolved_input / name, refine_dir / name)
         log("Liens symboliques/copies terminés.")
-    except Exception as e:
+    except OSError as e:  # shutil.Error is an OSError subclass
         log(f"Erreur fatale lors de la création de l'environnement Refine: {e}")
         raise RefineEnvironmentError(f"Erreur env Refine: {e}") from e
 

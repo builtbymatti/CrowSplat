@@ -35,7 +35,6 @@ from PySide6.QtWidgets import (
 )
 
 from app.core import notifications
-from app.core.base_engine import validate_path_standalone
 from app.core.config_io import (
     ChainConfig,
     delete_config,
@@ -48,13 +47,6 @@ from app.core.i18n import add_language_observer, get_current_lang, tr
 from app.core.run_state import PIPELINE_STEPS, RunState, StepStatus
 from app.gui.activity_bar import ActivityBar
 from app.gui.appbar import AppBar
-from app.gui.chaining_logic import (
-    is_chain_owned,
-    keeps_only_latest_checkpoint,
-    resolve_checkpoints_dir,
-    resolve_export_dir,
-    resolve_export_format,
-)
 from app.gui.logs_window import LogsWindow
 from app.gui.managers import AppLifecycle, SessionManager
 from app.gui.panels.cleaner_panel import CleanerPanel
@@ -62,28 +54,32 @@ from app.gui.panels.entrainement_panel import EntrainementPanel
 from app.gui.panels.export_panel import ExportPanel
 from app.gui.panels.extractor360_panel import Extractor360Panel
 from app.gui.panels.four_dgs_panel import FourDGSPanel
-from app.gui.panels.reconstruction_logic import (
-    RESUME_COLMAP_PROJECT,
-    RESUME_EXTERNAL_IMAGES,
-    apply_source_settings,
-    classify_resume_folder,
-    describe_unusable_source,
-    detect_source_kind,
-)
 from app.gui.panels.reconstruction_panel import ReconstructionPanel
 from app.gui.panels.sharp_panel import SharpPanel
 from app.gui.panels.source_panel import SourcePanel
 from app.gui.panels.splat_transform_panel import SplatTransformPanel
 from app.gui.panels.upscale_panel import UpscalePanel
 from app.gui.panels.visualiser_panel import VisualiserPanel
+from app.gui.pipeline_orchestrator import (
+    PipelineContext,
+    PipelineOrchestrator,
+    build_splat_transform_params,
+    decimate_needs_ply,
+    merge_sharp_params,
+)
 from app.gui.pipeline_planner import plan_pipeline
 from app.gui.rail import TOOL_KEYS, Rail, item_label
 from app.gui.settings_window import ResetDialog, SettingsWindow
 from app.gui.studio_nav import PageRegistry
 from app.gui.styles import DEFAULT_THEME, THEMES, get_saved_theme, set_dark_theme
-from app.gui.workers import (
+
+# Worker classes are resolved by name through ``_WorkerNamespace`` (late
+# lookup, handed to the Qt-free pipeline orchestrator): the imports below look
+# unused to the linter but are required.
+from app.gui.workers import (  # noqa: F401
     BrushWorker,
     CleanerWorker,
+    ColmapJob,
     ColmapWorker,
     ExportWorker,
     Extractor360Worker,
@@ -119,14 +115,36 @@ def _is_safe_project_name(name):
     return name not in ("", ".", "..") and "/" not in name and "\\" not in name
 
 
+def _ctx_field(name):
+    """Window attribute backed by a ``PipelineContext`` field."""
+    return property(
+        lambda self: getattr(self._ctx, name),
+        lambda self, value: setattr(self._ctx, name, value),
+    )
+
+
+class _WorkerNamespace:
+    """Worker classes, looked up in this module when used.
+
+    The orchestrator is Qt-free, so it receives the ``QThread`` workers through
+    this namespace. The lookup is late (not a snapshot) so replacing a worker
+    class on this module — as the tests do — is honoured.
+    """
+
+    def __getattr__(self, name):
+        try:
+            return globals()[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
 class StudioWindow(QMainWindow):
     """Four-zone shell. Rail selection → swaps the centre + right page."""
 
     # Class-level defaults of the OUTILS post-step state (L3-05/L5-08), so
     # the chain helpers behave when nothing set them (no tool launched yet).
+    # (``_tool_ply_root`` / ``_tool_producer_label`` live in the chain context.)
     _tool_post_steps = ()
-    _tool_ply_root = None
-    _tool_producer_label = None
     _retired_worker = None
 
     def __init__(self):
@@ -535,176 +553,88 @@ class StudioWindow(QMainWindow):
         self.breadcrumb.setText(" → ".join(plan))
 
     # ── Chaining of the main pipeline workers ────────────────────────────────────
+    # The chaining logic (step registry, worker builders, PLY lookup, prefill)
+    # lives in ``app.gui.pipeline_orchestrator``; the methods below keep the
+    # window's historical names and forward to it.
+    @property
+    def _ctx(self):
+        """Chain state, created on first use (also on __init__-less windows)."""
+        ctx = getattr(self, "_pipeline_ctx", None)
+        if ctx is None:
+            ctx = self._pipeline_ctx = PipelineContext()
+        return ctx
+
+    @property
+    def _orchestrator(self):
+        orch = getattr(self, "_pipeline_orch", None)
+        if orch is None:
+            orch = self._pipeline_orch = PipelineOrchestrator(
+                self, _WorkerNamespace(), self._ctx
+            )
+        return orch
+
+    current_plan = _ctx_field("plan")
+    current_pipeline_mode = _ctx_field("mode")
+    _plan_index = _ctx_field("plan_index")
+    _pipeline_images_dir = _ctx_field("images_dir")
+    _pending_upscale_params = _ctx_field("pending_upscale_params")
+    _chain_prefilled = _ctx_field("chain_prefilled")
+    _tool_ply_root = _ctx_field("tool_ply_root")
+    _tool_producer_label = _ctx_field("tool_producer_label")
+
     def _run_pipeline_step(self, index):
-        """Start the ``self.current_plan[index]`` step. Source has no worker of
-        its own (it only supplies the paths consumed by Reconstruction): it is
-        marked DONE immediately and the chain moves on. The OUTILS post-steps
-        (Nettoyage/Export/Visualiser) only appear in ``self.current_plan``
-        when their matching ``run_state`` flag is on (cf. ``plan_pipeline``);
-        when they are there, they are pre-filled from the previous step's
-        output then chained automatically like Reconstruction/Entraînement.
-        """
-        self._plan_index = index
-        if index >= len(self.current_plan):
-            self._finish_pipeline_chain(True, tr("run_chain_done", "Chaîne terminée avec succès."))
-            return
-
-        step = self.current_plan[index]
-        if step == "source":
-            self.run_state.set_status("source", StepStatus.DONE)
-            self.rail.set_step_status("source", StepStatus.DONE)
-            self._run_pipeline_step(index + 1)
-            return
-
-        if step == "extraction360":
-            worker = self._build_extraction360_worker()
-            if worker is not None:
-                self._start_pipeline_worker("extraction360", worker)
-            return
-
-        if step == "upscale":
-            worker = self._build_upscale_worker()
-            if worker is not None:
-                self._start_pipeline_worker("upscale", worker)
-            elif self._pending_upscale_params is not None:
-                # Video source: the images do not exist yet, the upscale is
-                # delegated to COLMAP, which runs it right after frame extraction
-                # and before feature extraction (cf.
-                # ``ColmapEngine._process_input``).
-                self.logs_window.append_log(
-                    tr("run_upscale_deferred",
-                       "Upscale : source vidéo — les trames seront agrandies au "
-                       "début de la Reconstruction, avant COLMAP.")
-                )
-                self.run_state.set_status("upscale", StepStatus.DONE)
-                self.rail.set_step_status("upscale", StepStatus.DONE)
-                self._run_pipeline_step(index + 1)
-            return
-
-        if step == "reconstruction":
-            worker = self._build_reconstruction_worker()
-            if worker is not None:
-                self._start_pipeline_worker("reconstruction", worker)
-            return
-
-        if step == "entrainement":
-            worker = self._build_brush_worker()
-            if worker is not None:
-                self._start_pipeline_worker("entrainement", worker)
-            return
-
-        if step == "nettoyage":
-            self._prefill_cleaner_from_brush()
-            worker = self._build_cleaner_worker()
-            if worker is not None:
-                self._start_pipeline_worker("nettoyage", worker)
-            else:
-                self._fail_pipeline_step("nettoyage", self._missing_producer_message())
-            return
-
-        if step == "export":
-            self._prefill_export_from_previous()
-            worker = self._build_export_worker()
-            if worker is not None:
-                self._start_pipeline_worker("export", worker)
-            else:
-                self._fail_pipeline_step("export", self._missing_producer_message())
-            return
-
-        if step == "visualiser":
-            self._prefill_visualiser_from_previous()
-            self._run_visualiser_pipeline_step()
-            return
-
-        # Defensive: ``plan_pipeline`` only produces keys handled above, so
-        # this branch should never run.
-        message = tr("run_chain_manual_continue").format(step)
-        self._finish_pipeline_chain(True, message)
+        self._orchestrator.run_step(index)
 
     def _resolve_source_type(self, step, input_path, source_state):
-        """Source type (``images``/``video``) for the ``step`` step, or None if
-        undecidable — in which case the step is already marked as failed.
-
-        Honours the user's explicit choice (Images/Vidéo) over auto-detection
-        when they made one (SourcePanel.combo_source_type, "auto" by default).
-        Shared by Upscale and Reconstruction, which must classify the same
-        source the same way.
-        """
-        forced_type = (source_state.get("source_type") or "auto").strip()
-        if forced_type in ("images", "video"):
-            # L5-03: the forced choice was never checked against the actual
-            # folder content — forcing "images" on a video-only source (or
-            # the reverse) silently fed the wrong kind of file into the next
-            # step. A "mixed" folder is exactly what the override exists
-            # for, so it is still accepted either way.
-            actual_kind = detect_source_kind(input_path)
-            if actual_kind not in (forced_type, "mixed"):
-                self._fail_pipeline_step(
-                    step,
-                    tr(
-                        "err_source_type_mismatch",
-                        "Type de source forcé sur « {forced} » mais le contenu "
-                        "détecté est « {actual} » — vérifiez le champ Source ou "
-                        "le sélecteur de type.",
-                    ).format(forced=forced_type, actual=actual_kind),
-                )
-                return None
-            return forced_type
-        input_type = detect_source_kind(input_path)
-        if input_type == "mixed":
-            self._fail_pipeline_step(
-                step,
-                tr(
-                    "err_source_mixed_types",
-                    "Le dossier contient à la fois des images et des vidéos — "
-                    "choisissez explicitement le type de source.",
-                ),
-            )
-            return None
-        if input_type == "empty":
-            # "empty" covers everything detect_source_kind cannot classify, so
-            # reporting "Chemins manquants" was wrong whenever the path existed
-            # and simply held an unreadable format (camera RAW, PSD…).
-            self._fail_pipeline_step(
-                step,
-                describe_unusable_source(
-                    input_path,
-                    convert_format=source_state.get("convert") or "png",
-                ),
-            )
-            return None
-        return input_type
+        return self._orchestrator.resolve_source_type(step, input_path, source_state)
 
     def _build_extraction360_worker(self):
-        """Build the worker of the Extraction 360 step.
+        return self._orchestrator.build_extraction360_worker()
 
-        Unlike Upscale, this step does not transform the images in place: it
-        **produces a new folder** of planar images out of an equirectangular
-        source (video or photos). That folder becomes the chain's current image
-        folder (``_pipeline_images_dir``), which Upscale then COLMAP consume
-        instead of the original source.
+    def _build_upscale_worker(self):
+        return self._orchestrator.build_upscale_worker()
 
-        The source type is not resolved here: the extractor accepts video as
-        well as images, and its output is always an image folder.
-        """
-        source_state = self.panels["source"].get_state()
-        input_path = source_state["input_path"].strip()
-        output_path = source_state["output_path"].strip()
-        if not input_path or not output_path:
-            self._fail_pipeline_step("extraction360", tr("err_no_paths", "Chemins manquants."))
-            return None
-        project_name = source_state["project_name"].strip() or "Untitled"
-        images_360 = Path(output_path) / project_name / "images_360"
-        safe_out = validate_path_standalone(str(images_360))
-        if safe_out is None:
-            self._fail_pipeline_step("extraction360", tr("err_no_paths", "Chemins manquants."))
-            return None
-        safe_out.mkdir(parents=True, exist_ok=True)
-        self._pipeline_images_dir = str(safe_out)
-        panel = self.panels["extraction360"]
-        panel.input_path.setText(input_path)
-        panel.output_path.setText(str(safe_out))
-        return Extractor360Worker(input_path, str(safe_out), panel.get_params())
+    def _build_reconstruction_worker(self):
+        return self._orchestrator.build_reconstruction_worker()
+
+    def _build_sharp_pipeline_worker(self):
+        return self._orchestrator.build_sharp_pipeline_worker()
+
+    def _build_fourdgs_pipeline_worker(self):
+        return self._orchestrator.build_fourdgs_pipeline_worker()
+
+    def _build_colmap_worker(self):
+        return self._orchestrator.build_colmap_worker()
+
+    def _build_brush_worker(self):
+        return self._orchestrator.build_brush_worker()
+
+    def _build_cleaner_worker(self):
+        return self._orchestrator.build_cleaner_worker()
+
+    def _build_export_worker(self):
+        return self._orchestrator.build_export_worker()
+
+    def _find_latest_ply(self, directory: Path):
+        return self._orchestrator.find_latest_ply(directory)
+
+    def _latest_reconstruction_ply(self):
+        return self._orchestrator.latest_reconstruction_ply()
+
+    def _missing_producer_message(self):
+        return self._orchestrator.missing_producer_message()
+
+    def _resolve_ply_output(self):
+        return self._orchestrator.resolve_ply_output()
+
+    def _prefill_cleaner_from_brush(self):
+        self._orchestrator.prefill_cleaner_from_brush()
+
+    def _prefill_export_from_previous(self):
+        self._orchestrator.prefill_export_from_previous()
+
+    def _prefill_visualiser_from_previous(self):
+        self._orchestrator.prefill_visualiser_from_previous()
 
     def _launch_extraction360(self):
         """Standalone run of the Extraction 360 step from OPTIONS, on the paths
@@ -716,437 +646,6 @@ class StudioWindow(QMainWindow):
         if not self._check_paths(input_path, output_path):
             return
         self._start_tool_worker(Extractor360Worker(input_path, output_path, panel.get_params()))
-
-    def _build_upscale_worker(self):
-        """Build the worker of the Upscale step, which enlarges the images
-        *before* COLMAP reads them.
-
-        If Extraction 360 ran just before, the source is the planar image folder
-        it produced (``_pipeline_images_dir``) — so always images, never a
-        video. Otherwise there are two cases, since the project images do not
-        exist yet at this stage:
-        - **image source**: an ``UpscaleImagesWorker`` writes the enlarged
-          images into ``<output>/<project>/images_upscaled``, which
-          ``_build_colmap_worker`` then takes as input. The user's source
-          folder stays untouched.
-        - **video source**: nothing to enlarge until the frames are extracted.
-          We fill ``_pending_upscale_params``, which ``_build_colmap_worker``
-          passes on to ``ColmapWorker``: the engine enlarges the frames right
-          after extraction and before COLMAP (the ``upscale_config`` mechanism
-          already in place in ``engine.py``). Returns None without failing —
-          the caller chains on.
-        """
-        source_state = self.panels["source"].get_state()
-        input_path = source_state["input_path"].strip()
-        output_path = source_state["output_path"].strip()
-        if not input_path or not output_path:
-            self._fail_pipeline_step("upscale", tr("err_no_paths", "Chemins manquants."))
-            return None
-
-        params = self.panels["upscale"].get_params()
-        if self._pipeline_images_dir:
-            input_path, input_type = self._pipeline_images_dir, "images"
-        else:
-            input_type = self._resolve_source_type("upscale", input_path, source_state)
-            if input_type is None:
-                return None
-            if input_type == "video":
-                self._pending_upscale_params = {**params, "active": True}
-                return None
-
-        project_name = source_state["project_name"].strip() or "Untitled"
-        upscaled_dir = Path(output_path) / project_name / "images_upscaled"
-        self._pipeline_images_dir = str(upscaled_dir)
-        return UpscaleImagesWorker(input_path, str(upscaled_dir), params)
-
-    def _build_reconstruction_worker(self):
-        """Pick the Reconstruction worker matching the Source panel's mode.
-
-        The three modes share the step slot but not the engine: Gsplat runs
-        COLMAP, Sharp runs Apple ML Sharp inference, 4DGS prepares a Nerfstudio
-        dataset. Before this, every mode fell through to COLMAP, so picking
-        Sharp or 4DGS in the Source dropdown changed nothing on Launch."""
-        if self.current_pipeline_mode == "sharp":
-            return self._build_sharp_pipeline_worker()
-        if self.current_pipeline_mode == "4dgs":
-            return self._build_fourdgs_pipeline_worker()
-        return self._build_colmap_worker()
-
-    def _build_sharp_pipeline_worker(self):
-        """``SharpWorker`` for the Sharp mode, fed by the Source paths.
-
-        Sharp's own settings (device, checkpoint, verbose) still come from the
-        OUTILS Sharp panel; only the paths are taken from Source, so that the
-        chained run and the standalone button stay consistent. Video inputs are
-        rejected here (L3-03): the pipeline's Source step feeds image folders,
-        and Sharp's video mode has its own worker in the OUTILS panel — this
-        docstring used to claim the rejection without the code doing it.
-
-        Output nested under ``<output>/<project>`` (L5-01), same as gsplat
-        (``_build_colmap_worker``) and 4DGS (``_build_fourdgs_pipeline_worker``):
-        before this, every Sharp pipeline run of every project landed straight
-        in the shared output folder, overwriting the previous one.
-        """
-        source_state = self.panels["source"].get_state()
-        input_path = self._pipeline_images_dir or source_state["input_path"].strip()
-        output_path = source_state["output_path"].strip()
-        if not input_path or not output_path:
-            self._fail_pipeline_step("reconstruction", tr("err_no_paths", "Chemins manquants."))
-            return None
-        if not self._pipeline_images_dir:
-            input_type = self._resolve_source_type("reconstruction", input_path, source_state)
-            if input_type is None:
-                return None
-            if input_type == "video":
-                self._fail_pipeline_step(
-                    "reconstruction",
-                    tr(
-                        "err_sharp_video_rejected",
-                        "Le mode Sharp de la chaîne attend un dossier d'images — "
-                        "utilisez le module Sharp (OUTILS) pour traiter une vidéo "
-                        "directement.",
-                    ),
-                )
-                return None
-        project_name = source_state["project_name"].strip() or "Untitled"
-        project_output = str(Path(output_path) / project_name)
-        params = self.panels["sharp"].get_params()
-        params.update({"mode": "image", "input_path": input_path, "output_path": project_output})
-        return SharpWorker(input_path, project_output, params)
-
-    def _build_fourdgs_pipeline_worker(self):
-        """``FourDGSWorker`` for the 4DGS mode, fed by the Source paths.
-
-        Source points at the multi-camera video folder; the 4DGS panel keeps
-        supplying FPS and the COLMAP settings.
-
-        ``upscale_params`` (L3-04) and ``video_trim`` (L5-04) are forwarded
-        just like ``_build_colmap_worker`` does: when the source is a video,
-        the pipeline's own Upscale step (``_build_upscale_worker``) cannot
-        enlarge frames that do not exist yet and defers to
-        ``_pending_upscale_params`` instead — before this fix, 4DGS silently
-        dropped that deferred upscale and the Source panel's video trim
-        alike, unlike the gsplat path.
-        """
-        source_state = self.panels["source"].get_state()
-        videos_dir = source_state["input_path"].strip()
-        output_path = source_state["output_path"].strip()
-        if not videos_dir or not output_path:
-            self._fail_pipeline_step("reconstruction", tr("err_no_paths", "Chemins manquants."))
-            return None
-        panel_params = self.panels["4dgs"].get_params()
-        colmap_params = {
-            key: panel_params[key]
-            for key in ("camera_model", "single_camera", "matcher_type", "sequential_overlap")
-            if key in panel_params
-        }
-        project_name = source_state["project_name"].strip() or "Untitled"
-        return FourDGSWorker(
-            videos_dir, str(Path(output_path) / project_name),
-            source_state["fps"] or panel_params["fps"],
-            colmap_params=colmap_params,
-            upscale_params=self._pending_upscale_params,
-            video_trim=source_state.get("video_trim"),
-        )
-
-    def _resolve_colmap_resume(self, output_path, project_name):
-        """Classify ReconstructionPanel's "Resume COLMAP" field (D1 — it was
-        read nowhere in this module, so the feature announced in the panel
-        had no effect regardless of what was typed there).
-
-        - empty field: no resume requested, returns ``None``;
-        - existing CorbeauSplat project (``images/``, ``database.db`` or
-          ``sparse/`` already there): the engine must work *in place* on that
-          folder with ``resume_colmap=True`` (skips re-processing the source,
-          reuses ``<project>/images``) — so ``output_path``/``project_name``
-          are overridden to be exactly the resumed folder;
-        - external image folder (images directly inside, no CorbeauSplat
-          structure): used as a plain image input for a fresh project under
-          the *current* Source output/project — same as typing it into
-          Source's Input field, no ``resume_colmap``;
-        - anything else (missing/invalid folder): fails the step and returns
-          ``False``.
-
-        Returns ``(input_path, input_type, output_path, project_name,
-        resume_colmap)`` on a resume request, ``None`` when the field is
-        empty, or ``False`` after already failing the step.
-        """
-        raw = self.panels["reconstruction"].resume_path.text().strip()
-        if not raw:
-            return None
-        kind = classify_resume_folder(raw)
-        resume_dir = Path(raw)
-        if kind == RESUME_COLMAP_PROJECT:
-            return str(resume_dir), "images", str(resume_dir.parent), resume_dir.name, True
-        if kind == RESUME_EXTERNAL_IMAGES:
-            return str(resume_dir), "images", output_path, project_name, False
-        self._fail_pipeline_step(
-            "reconstruction",
-            tr(
-                "err_colmap_resume_invalid",
-                "Chemin de reprise COLMAP invalide — attendu un projet CorbeauSplat "
-                "existant (images/, database.db ou sparse/) ou un dossier contenant "
-                "directement des images.",
-            ),
-        )
-        return False
-
-    def _build_colmap_worker(self):
-        """Build the ``ColmapWorker`` of the Reconstruction step from the Source
-        paths (SourcePanel.get_state) and the COLMAP settings of Reconstruction
-        (ReconstructionPanel.get_params → ColmapParams).
-
-        If the Upscale step ran just before, the input becomes the enlarged
-        image folder it produced (cf. ``_build_upscale_worker``). A "Resume
-        COLMAP" folder (D1), when filled in, overrides the source/output
-        entirely — cf. ``_resolve_colmap_resume``.
-        """
-        source_state = self.panels["source"].get_state()
-        input_path = source_state["input_path"].strip()
-        output_path = source_state["output_path"].strip()
-        if not input_path or not output_path:
-            self._fail_pipeline_step("reconstruction", tr("err_no_paths", "Chemins manquants."))
-            return None
-        project_name = source_state["project_name"].strip() or "Untitled"
-        params = apply_source_settings(
-            self.panels["reconstruction"].get_params(), source_state
-        )
-        resume = self._resolve_colmap_resume(output_path, project_name)
-        if resume is False:
-            return None
-        resume_colmap = False
-        if resume is not None:
-            input_path, input_type, output_path, project_name, resume_colmap = resume
-        elif self._pipeline_images_dir:
-            input_path, input_type = self._pipeline_images_dir, "images"
-        else:
-            input_type = self._resolve_source_type("reconstruction", input_path, source_state)
-            if input_type is None:
-                return None
-        worker = ColmapWorker(
-            params, input_path, output_path, input_type, source_state["fps"],
-            project_name=project_name,
-            upscale_params=self._pending_upscale_params,
-        )
-        if resume_colmap:
-            worker.engine.resume_colmap = True
-        return worker
-
-    def _build_brush_worker(self):
-        """Build the ``BrushWorker`` of the Entraînement step: dataset = the
-        project folder created by COLMAP (output/project), Brush settings from
-        EntrainementPanel.get_params → BrushParams.to_engine_params (the flat
-        dict expected by BrushEngine, cf. app/core/brush_engine.py).
-        """
-        source_state = self.panels["source"].get_state()
-        output_path = source_state["output_path"].strip()
-        if not output_path:
-            self._fail_pipeline_step("entrainement", tr("err_no_paths", "Chemins manquants."))
-            return None
-        project_name = source_state["project_name"].strip() or "Untitled"
-        project_dir = Path(output_path) / project_name
-        checkpoints_dir = resolve_checkpoints_dir(source_state)
-        if checkpoints_dir is None:
-            self._fail_pipeline_step(
-                "entrainement",
-                tr("err_checkpoint_dest_invalid",
-                   "Destination des checkpoints invalide."),
-            )
-            return None
-        checkpoints_dir.mkdir(parents=True, exist_ok=True)
-        panel = self.panels["entrainement"]
-        params = panel.get_params().to_engine_params()
-        params["refine_mode"] = panel.combo_mode.currentData() == "refine"
-        ply_name = panel.ply_name_edit.text().strip()
-        if ply_name:
-            params["ply_name"] = ply_name
-        return BrushWorker(
-            project_dir, checkpoints_dir, params, project_name=project_name,
-            # Original semantics of the field (CHANGELOG 1.2.3): a custom
-            # destination only keeps the last checkpoint; an empty field =
-            # historical behaviour, every checkpoint kept.
-            keep_only_latest=keeps_only_latest_checkpoint(source_state),
-        )
-
-    # ── Pre-filling the OUTILS post-steps from the previous step's output
-    # (cf. Section G: Entraînement → Nettoyage → Export → Visualiser chaining,
-    # only when the matching ``run_state`` flag is on) ────────────────────────────────
-    def _find_latest_ply(self, directory: Path):
-        """Most recently modified ``.ply`` file under ``directory`` (recursive),
-        or ``None``. Same lookup idiom as ``BrushWorker.handle_ply_rename``
-        (app/gui/workers.py), but simpler: the final name chosen by Brush is
-        unknown here (it depends on ``ply_name``/``project_name``), so we read
-        the filesystem back once training is over rather than duplicating its
-        renaming logic.
-        """
-        if not directory.exists():
-            return None
-        latest, latest_mtime = None, -1.0
-        for ply_path in directory.rglob("*.ply"):
-            try:
-                mtime = ply_path.stat().st_mtime
-            except OSError:
-                continue
-            if mtime > latest_mtime:
-                latest, latest_mtime = ply_path, mtime
-        return latest
-
-    def _latest_brush_ply(self):
-        """PLY produced by the last Entraînement step, in the project's
-        checkpoints folder (cf. ``_build_brush_worker``).
-        """
-        checkpoints_dir = resolve_checkpoints_dir(self.panels["source"].get_state())
-        if checkpoints_dir is None:
-            return None
-        return self._find_latest_ply(checkpoints_dir)
-
-    def _latest_sharp_ply(self):
-        """PLY produced by the last Sharp reconstruction step (L5-02): Sharp
-        is not a trainer, it writes its splat directly under
-        ``<output>/<project>`` (cf. ``_build_sharp_pipeline_worker``, L5-01),
-        with no separate "checkpoints" folder like Brush.
-        """
-        source_state = self.panels["source"].get_state()
-        output_path = source_state["output_path"].strip()
-        if not output_path:
-            return None
-        project_name = source_state["project_name"].strip() or "Untitled"
-        return self._find_latest_ply(Path(output_path) / project_name)
-
-    def _latest_reconstruction_ply(self):
-        """PLY produced by whichever reconstruction step actually ran, for
-        the current pipeline mode (L5-02): before this, Nettoyage/Export/
-        Visualiser only ever looked for Brush's output, so a plan without
-        Brush (Sharp mode, or gsplat with "Lancer Brush" unticked) always
-        found nothing and failed with a generic "Chemins manquants" that
-        named no culprit.
-
-        ``_latest_brush_ply`` is kept as its own method (not folded in here):
-        it is patched directly by tests/test_gui_config_roundtrip.py.
-
-        When an OUTILS tool started the chain (L3-05/L5-08), its own output
-        location wins over the Source-panel lookup: the tool pages have their
-        own path fields, unrelated to the Projet panel.
-        """
-        if self._tool_ply_root is not None:
-            root = Path(self._tool_ply_root)
-            if root.is_file():
-                return root if root.suffix.lower() == ".ply" else None
-            return self._find_latest_ply(root)
-        if self.current_pipeline_mode == "sharp":
-            return self._latest_sharp_ply()
-        return self._latest_brush_ply()
-
-    def _missing_producer_message(self):
-        """Clear message for a Nettoyage/Export step with no PLY to work on
-        (L5-02), naming the step that should have produced it instead of the
-        generic "Chemins manquants" — which gave no clue when Brush was
-        skipped (mode without Entraînement) or Sharp had written nothing.
-        """
-        if self._tool_producer_label:
-            producer = self._tool_producer_label
-        elif self.current_pipeline_mode == "sharp":
-            producer = "Sharp"
-        elif self.current_pipeline_mode == "gsplat" and self.run_state.entrainement_apres:
-            producer = tr("producer_training_brush", "Entraînement (Brush)")
-        else:
-            return tr("err_no_paths", "Chemins manquants.")
-        return tr(
-            "err_no_ply_from_producer",
-            "Aucun fichier .ply trouvé — l'étape « {producer} » n'a pas encore "
-            "produit de résultat (ou n'est pas dans la chaîne actuelle).",
-        ).format(producer=producer)
-
-    def _resolve_ply_output(self):
-        """Most relevant PLY path to hand to the next step: the Nettoyage
-        output when that step is on (``nettoyer_apres``), otherwise the PLY
-        produced by the reconstruction step (cf. ``_latest_reconstruction_ply``).
-        """
-        if self.run_state.nettoyer_apres:
-            cleaned = self.panels["nettoyage"].output_path.text().strip()
-            if cleaned:
-                return cleaned
-        latest_ply = self._latest_reconstruction_ply()
-        return str(latest_ply) if latest_ply is not None else ""
-
-    def _prefill_cleaner_from_brush(self):
-        """Pre-fill the Nettoyage panel with the PLY produced by the previous
-        reconstruction step, before the worker is built (cf.
-        ``_build_cleaner_worker``).
-        """
-        latest_ply = self._latest_reconstruction_ply()
-        if latest_ply is None:
-            return
-        panel = self.panels["nettoyage"]
-        panel.input_path.setText(str(latest_ply))
-        if is_chain_owned(panel.output_path.text(), self._chain_prefilled.get("nettoyage")):
-            cleaned = str(latest_ply.with_name(f"clean_{latest_ply.name}"))
-            panel.output_path.setText(cleaned)
-            self._chain_prefilled["nettoyage"] = cleaned
-
-    def _prefill_export_from_previous(self):
-        """Pre-fill the Export panel from the previous step's output (Nettoyage
-        when on, otherwise Entraînement directly).
-
-        The "Export folder" and "Format" fields of the Projet panel, when they
-        are filled in, win over whatever is typed into the Export panel: they
-        are the *chain* settings, whereas the Export panel also serves local
-        runs. Left empty, the previous behaviour is unchanged (folder of the
-        source PLY, current format of the panel).
-        """
-        source_path = self._resolve_ply_output()
-        if not source_path:
-            return
-        source_state = self.panels["source"].get_state()
-        panel = self.panels["export"]
-        panel.input_path.setText(source_path)
-
-        current_output = panel.output_path.text()
-        if is_chain_owned(current_output, self._chain_prefilled.get("export")):
-            current_output = ""
-        export_dir = resolve_export_dir(source_state, source_path, current_output)
-        if export_dir is not None:
-            panel.output_path.setText(export_dir)
-            self._chain_prefilled["export"] = export_dir
-
-        export_format = resolve_export_format(source_state)
-        if export_format:
-            idx = panel.combo_format.findData(export_format)
-            if idx >= 0:
-                panel.combo_format.setCurrentIndex(idx)
-
-    def _prefill_visualiser_from_previous(self):
-        """Pre-fill the Visualiser panel from the previous step's output (same
-        rule as ``_prefill_export_from_previous``).
-        """
-        source_path = self._resolve_ply_output()
-        if source_path:
-            self.panels["visualiser"].input_path.setText(source_path)
-
-    def _run_visualiser_pipeline_step(self):
-        """Visualiser step of the chain: ``VisualiserPanel`` is not a
-        Worker/QThread (persistent server via ``toggle_server()``), so there is
-        no classic DONE/ERROR driven by a ``finished_signal``. The step is
-        marked DONE as soon as the server starts successfully (without waiting
-        for a run to end); if the start fails, ERROR.
-        """
-        # L5-10: this step never sets ``_active_worker`` — Cancel is a no-op
-        # here by design. toggle_server() only spawns the servers and returns
-        # (no blocking wait), so the step ends synchronously.
-        panel = self.panels["visualiser"]
-        self.run_state.set_status("visualiser", StepStatus.RUNNING)
-        self.rail.set_step_status("visualiser", StepStatus.RUNNING)
-        if not panel.is_running():
-            panel.toggle_server()
-        if panel.is_running():
-            self.run_state.set_status("visualiser", StepStatus.DONE)
-            self.rail.set_step_status("visualiser", StepStatus.DONE)
-            self._run_pipeline_step(self._plan_index + 1)
-        else:
-            self._fail_pipeline_step(
-                "visualiser",
-                tr("err_visualiser_start", "Échec du démarrage du serveur SuperSplat."),
-            )
 
     def _start_pipeline_worker(self, step, worker):
         """Start the worker of a pipeline step: rail/run_state statuses set at
@@ -1364,45 +863,11 @@ class StudioWindow(QMainWindow):
         QMessageBox.critical(self, tr("msg_error", "Erreur"), tr("err_no_paths", "Chemins manquants."))
         return False
 
-    def _build_cleaner_worker(self):
-        """Build the ``CleanerWorker`` from the current fields of the Nettoyage
-        panel. Shared by ``_launch_cleaner`` (local button, outside the chain)
-        and the ``nettoyage`` step of the pipeline chain (cf.
-        ``_run_pipeline_step``), which pre-fills the fields before the call
-        (cf. ``_prefill_cleaner_from_brush``).
-        """
-        panel = self.panels["nettoyage"]
-        input_path = panel.input_path.text().strip()
-        output_path = panel.output_path.text().strip()
-        if not input_path or not output_path:
-            return None
-        params = panel.get_params()
-        # L2-04: the "recursive" checkbox was added to the panel but never
-        # reached CleanerWorker, which defaults to a flat (non-recursive) scan.
-        return CleanerWorker(
-            input_path, output_path, params, recursive=params.get("recursive", False)
-        )
-
     def _launch_cleaner(self):
         panel = self.panels["nettoyage"]
         if not self._check_paths(panel.input_path.text().strip(), panel.output_path.text().strip()):
             return
         self._start_tool_worker(self._build_cleaner_worker())
-
-    def _build_export_worker(self):
-        """Build the ``ExportWorker`` from the current fields of the Export
-        panel. Shared by ``_launch_export`` (local button, outside the chain)
-        and the ``export`` step of the pipeline chain (cf.
-        ``_run_pipeline_step``).
-        """
-        panel = self.panels["export"]
-        input_paths = [p for p in panel.input_path.text().split("|") if p.strip()]
-        output_dir = panel.output_path.text().strip()
-        if not input_paths or not output_dir:
-            return None
-        return ExportWorker(
-            input_paths, output_dir, panel.get_format(), options={"scale": panel.get_scale()}
-        )
 
     def _launch_export(self):
         worker = self._build_export_worker()
@@ -1465,22 +930,13 @@ class StudioWindow(QMainWindow):
         self._start_tool_worker(worker)
 
     def _launch_sharp(self):
-        panel = self.panels["sharp"]
-        params = panel.get_params()
-        upscale_checked = params.get("upscale", False)
-        params.update(self.panels["upscale"].get_params())
-        params["upscale"] = upscale_checked
-        if params["mode"] == "video":
-            if not self._check_paths(params["video_path"], params["video_output_path"]):
-                return
-            worker = SharpVideoWorker(params["video_path"], params["video_output_path"], params)
-            worker.long_run_signal.connect(self._confirm_sharp_long_run)
-            ply_root = Path(params["video_output_path"])
-        else:
-            if not self._check_paths(params["input_path"], params["output_path"]):
-                return
-            worker = SharpWorker(params["input_path"], params["output_path"], params)
-            ply_root = Path(params["output_path"])
+        params = merge_sharp_params(
+            self.panels["sharp"].get_params(), self.panels["upscale"].get_params()
+        )
+        built = self._build_sharp_tool_worker(params)
+        if built is None:
+            return
+        worker, ply_root = built
         # L3-05: the page's "Nettoyage/Exporter/SuperSplat après" checkboxes
         # apply to this button too, on the PLY Sharp writes in its output folder.
         self._start_tool_worker(
@@ -1489,6 +945,20 @@ class StudioWindow(QMainWindow):
             ply_root=ply_root,
             producer_label="Sharp",
         )
+
+    def _build_sharp_tool_worker(self, params):
+        """``(worker, ply_root)`` for the Sharp page's mode, or None when the
+        required paths are missing (the user has already been told)."""
+        if params["mode"] == "video":
+            if not self._check_paths(params["video_path"], params["video_output_path"]):
+                return None
+            worker = SharpVideoWorker(params["video_path"], params["video_output_path"], params)
+            worker.long_run_signal.connect(self._confirm_sharp_long_run)
+            return worker, Path(params["video_output_path"])
+        if not self._check_paths(params["input_path"], params["output_path"]):
+            return None
+        worker = SharpWorker(params["input_path"], params["output_path"], params)
+        return worker, Path(params["output_path"])
 
     def _confirm_sharp_long_run(self, worker, total_frames: int, estimated_seconds: float):
         """Ask before committing the machine to a very long Sharp video run.
@@ -1515,6 +985,12 @@ class StudioWindow(QMainWindow):
         )
         worker.answer_long_run(answer == QMessageBox.StandardButton.Yes)
 
+    def _warn_decimate_needs_ply(self):
+        QMessageBox.critical(
+            self, tr("msg_error", "Erreur"),
+            tr("err_decimate_ply_only", "La décimation nécessite une sortie au format .ply."),
+        )
+
     def _launch_splat_transform(self):
         panel = self.panels["splattransform"]
         input_path = panel.input_path.text().strip()
@@ -1522,31 +998,16 @@ class StudioWindow(QMainWindow):
         if not self._check_paths(input_path, output_dir):
             return
         src_params = panel.get_params()
+        if decimate_needs_ply(src_params):
+            self._warn_decimate_needs_ply()
+            return
         output_path = str(Path(output_dir) / f"{Path(input_path).stem}.{src_params['format']}")
-        st_params = {"--overwrite": True}
-        if src_params["filter_nan"]:
-            st_params["--filter-nan"] = True
-        if src_params["filter_floaters"]:
-            st_params["--filter-floaters"] = True
-        if src_params["morton"]:
-            st_params["--morton-order"] = True
-        if src_params["harmonics"]:
-            st_params["--filter-harmonics"] = "0"
-        if src_params["decimate"] < 100:
-            # Safety net: the panel resets decimate to 100 when the format is
-            # not ply, but a loaded config could still set both (L3-11).
-            if src_params["format"] != "ply":
-                QMessageBox.critical(
-                    self, tr("msg_error", "Erreur"),
-                    tr("err_decimate_ply_only",
-                       "La décimation nécessite une sortie au format .ply."),
-                )
-                return
-            st_params["--decimate"] = f"{src_params['decimate']:.0f}%"
-        worker = SplatTransformWorker(input_path, output_path, st_params)
+        worker = SplatTransformWorker(
+            input_path, output_path, build_splat_transform_params(src_params)
+        )
         # L3-05: post-steps run on the converted file itself; Nettoyage/Export
         # need a .ply, so a non-PLY output fails those steps with a clear
-        # message naming SplatTransform (cf. ``_missing_producer_message``).
+        # message naming SplatTransform (``missing_producer_message``).
         self._start_tool_worker(
             worker,
             post_steps=self._post_steps_from_flags("nettoyage", "export", "visualiser"),

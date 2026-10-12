@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 from .base_engine import BaseEngine
+from .i18n import tr
 from .media import format_timecode, is_video_file, without_hwaccel
 from .sparse_models import promote_largest_model
 from .system import (
@@ -94,10 +95,10 @@ class FourDGSEngine(BaseEngine):
         ])
 
         if start is not None or duration is not None:
-            self.log(
-                f"Plage retenue : {format_timecode(start or 0.0)} → "
-                f"{format_timecode((start or 0.0) + (duration or 0.0))}"
-            )
+            self.log(tr("fdgs_log_range", "Selected range: {start} → {end}").format(
+                start=format_timecode(start or 0.0),
+                end=format_timecode((start or 0.0) + (duration or 0.0)),
+            ))
 
         # Template Method: delegation to the centralised _execute_command
         # Big videos / slow external drives: same ceiling as Brush (4h).
@@ -105,7 +106,7 @@ class FourDGSEngine(BaseEngine):
         if returncode != 0 and "-hwaccel" in cmd and not self.stop_requested:
             # VideoToolbox refuses some streams (ProRes, 10-bit HEVC in a .mov):
             # retry in software rather than reject the container.
-            self.log("Décodage matériel refusé — nouvelle tentative en logiciel")
+            self.log(tr("log_hwdecode_retry", "Hardware decoding refused - retrying in software"))
             returncode = self._execute_command(without_hwaccel(cmd), timeout=14400)
         return returncode == 0
 
@@ -131,7 +132,10 @@ class FourDGSEngine(BaseEngine):
         if not cam_dirs:
             return images_path
         if len(cam_dirs) == 1:
-            self.log(f"Single camera ({cam_dirs[0].name}): monocular capture, SfM on all its frames.")
+            self.log(tr(
+                "fdgs_log_single_camera",
+                "Single camera ({name}): monocular capture, SfM on all its frames.",
+            ).format(name=cam_dirs[0].name))
             return cam_dirs[0]
 
         # Ownership signature (F-011): the staging folder may only be deleted if
@@ -141,12 +145,12 @@ class FourDGSEngine(BaseEngine):
         ownership_marker = staging_path.parent / (staging_path.name + ".corbeausplat_owned")
         if staging_path.exists() or staging_path.is_symlink():
             if staging_path.is_symlink() or not ownership_marker.is_file():
-                raise RuntimeError(
-                    f"Le dossier {staging_path} existe déjà et n'a pas été créé "
-                    "par CorbeauSplat (aucun marqueur d'appartenance). "
-                    "Renommez-le ou déplacez-le pour ne pas écraser vos fichiers, "
-                    "puis relancez."
-                )
+                raise RuntimeError(tr(
+                    "fdgs_err_staging_not_owned",
+                    "The folder {path} already exists and was not created by CorbeauSplat "
+                    "(no ownership marker). Rename or move it so your files are not "
+                    "overwritten, then run again.",
+                ).format(path=staging_path))
             shutil.rmtree(staging_path)
         staging_path.mkdir(parents=True)
         ownership_marker.write_text("owned-by-corbeausplat", encoding="utf-8")
@@ -158,7 +162,10 @@ class FourDGSEngine(BaseEngine):
             reference = frames[0]
             shutil.copy2(reference, staging_path / f"{cam_dir.name}{reference.suffix}")
 
-        self.log(f"Static reference set: {len(cam_dirs)} camera(s), 1 frame each -> {staging_path}")
+        self.log(tr(
+            "fdgs_log_static_set",
+            "Static reference set: {n} camera(s), 1 frame each -> {path}",
+        ).format(n=len(cam_dirs), path=staging_path))
         return staging_path
 
     def run_colmap(self, dataset_root, camera_model="OPENCV", single_camera=True,
@@ -180,7 +187,7 @@ class FourDGSEngine(BaseEngine):
 
         safe_root = self.validate_path(dataset_root)
         if safe_root is None:
-            self.log(f"SECURITY: Invalid dataset directory: {dataset_root}")
+            self.log(tr("log_invalid_dataset_dir", "SECURITY: Invalid dataset directory: {name}").format(name=dataset_root))
             return False
 
         root = safe_root
@@ -196,8 +203,8 @@ class FourDGSEngine(BaseEngine):
             return False
 
         # 1. Feature Extraction
-        self.log("--- COLMAP: Feature Extraction ---")
-        self.status("Extraction des features (COLMAP)...")
+        self.log(tr("fdgs_log_colmap_extract", "--- COLMAP: Feature Extraction ---"))
+        self.status(tr("status_feature_extraction", "Feature extraction..."))
         cmd_extract = [
             self.colmap, "feature_extractor",
             "--database_path", str(db_path),
@@ -209,8 +216,8 @@ class FourDGSEngine(BaseEngine):
         if self._execute_command(cmd_extract, env=compute_env(), timeout=14400) != 0:
             return False
 
-        self.log("--- COLMAP: Feature Matching ---")
-        self.status("Matching des features...")
+        self.log(tr("fdgs_log_colmap_match", "--- COLMAP: Feature Matching ---"))
+        self.status(tr("status_feature_matching", "Feature matching..."))
         if matcher_type == "sequential":
             cmd_match = [
                 self.colmap, "sequential_matcher",
@@ -227,8 +234,8 @@ class FourDGSEngine(BaseEngine):
             return False
 
         # 3. Mapper
-        self.log("--- COLMAP: Mapper (Sparse Reconstruction) ---")
-        self.status("Reconstruction 3D (Mapper)...")
+        self.log(tr("fdgs_log_colmap_mapper", "--- COLMAP: Mapper (Sparse Reconstruction) ---"))
+        self.status(tr("status_reconstruction", "3D Reconstruction (Mapper)..."))
         cmd_mapper = [
             self.colmap, "mapper",
             "--database_path", str(db_path),
@@ -244,7 +251,7 @@ class FourDGSEngine(BaseEngine):
         # The mapper may leave a stub model in 0/ and the real one in 1/;
         # downstream reads 0/ only.
         if promote_largest_model(sparse_path, log=self.log) is None:
-            self.log("COLMAP mapper produced no sparse model (sparse/0 missing).")
+            self.log(tr("fdgs_log_no_sparse", "COLMAP mapper produced no sparse model (sparse/0 missing)."))
             return False
         return True
 
@@ -265,7 +272,7 @@ class FourDGSEngine(BaseEngine):
 
         upscaler = UpscaleEngine(logger_callback=self.log)
         if not upscaler.is_installed():
-            self.log("WARNING: upscayl-bin not found. Upscale skipped.")
+            self.log(tr("fdgs_log_upscale_no_binary", "WARNING: upscayl-bin not found. Upscale skipped."))
             return True
 
         images_root = Path(output_dir) / "images"
@@ -289,18 +296,30 @@ class FourDGSEngine(BaseEngine):
             src_dir = cam_dir.parent / f"{cam_dir.name}_src"
             done_marker = src_dir / ".upscale_complete"
             if src_dir.exists() and done_marker.exists():
-                self.log(f"'{src_dir.name}' already exists — {cam_dir.name} already upscaled.")
+                self.log(tr(
+                    "fdgs_log_already_upscaled",
+                    "'{src}' already exists - {cam} already upscaled.",
+                ).format(src=src_dir.name, cam=cam_dir.name))
                 continue
             if not src_dir.exists():
-                self.log(f"Moving originals of {cam_dir.name} to {src_dir.name}...")
+                self.log(tr(
+                    "fdgs_log_moving_originals",
+                    "Moving originals of {cam} to {src}...",
+                ).format(cam=cam_dir.name, src=src_dir.name))
                 shutil.move(str(cam_dir), str(src_dir))
                 cam_dir.mkdir(parents=True, exist_ok=True)
             else:
                 # F-003: src exists but the previous upscale never completed
                 # (no sentinel) — relaunch instead of silently skipping.
-                self.log(f"'{src_dir.name}' exists but {cam_dir.name} never fully upscaled — relaunching...")
+                self.log(tr(
+                    "fdgs_log_relaunch_upscale",
+                    "'{src}' exists but {cam} was never fully upscaled - relaunching...",
+                ).format(src=src_dir.name, cam=cam_dir.name))
 
-            self.log(f"Upscaling {cam_dir.name} x{scale} with model '{model_id}'...")
+            self.log(tr(
+                "fdgs_log_upscaling",
+                "Upscaling {cam} x{scale} with model '{model}'...",
+            ).format(cam=cam_dir.name, scale=scale, model=model_id))
             success, msg = upscaler.upscale_folder(
                 input_dir=str(src_dir),
                 output_dir=str(cam_dir),
@@ -313,23 +332,25 @@ class FourDGSEngine(BaseEngine):
                 cancel_check=lambda: self.stop_requested,
             )
             if not success:
-                self.log(f"Upscale failed for {cam_dir.name}: {msg}")
+                self.log(tr("fdgs_log_upscale_failed", "Upscale failed for {cam}: {msg}").format(cam=cam_dir.name, msg=msg))
                 return False
             done_marker.write_text("ok", encoding="utf-8")
 
-        self.log("Upscale complete.")
+        self.log(tr("up_msg_complete", "Upscale complete."))
         return True
 
     def process_dataset(self, videos_dir, output_dir, fps=5, colmap_params=None, video_trim=None):
         safe_in = self.validate_path(videos_dir)
-        safe_out = self.validate_path(output_dir) or self.validate_path(str(Path(output_dir).parent))
+        safe_out = self.validate_path(output_dir)
         if safe_in is None:
-            self.log(f"SECURITY: Invalid input directory: {Path(str(videos_dir)).name}")
+            self.log(tr("log_invalid_input_dir", "SECURITY: Invalid input directory: {name}").format(
+                name=Path(str(videos_dir)).name))
             return False
         if safe_out is None:
-            self.log(f"SECURITY: Invalid output directory: {Path(str(output_dir)).name}")
+            self.log(tr("log_invalid_output_dir", "SECURITY: Invalid output directory: {name}").format(
+                name=Path(str(output_dir)).name))
             return False
-        self.log(f"Scan du dossier : {safe_in.name}")
+        self.log(tr("fdgs_log_scan", "Scanning folder: {name}").format(name=safe_in.name))
         videos_path = Path(safe_in)
         videos = sorted([
             f for f in videos_path.iterdir()
@@ -337,10 +358,10 @@ class FourDGSEngine(BaseEngine):
         ])
 
         if not videos:
-            self.log("Aucune vidéo trouvée.")
+            self.log(tr("fdgs_log_no_videos", "No video found."))
             return False
 
-        self.log(f"Trouvé {len(videos)} vidéos. Début extraction...")
+        self.log(tr("fdgs_log_found_videos", "Found {n} videos. Starting extraction...").format(n=len(videos)))
 
         images_root = Path(safe_out) / "images"
         images_root.mkdir(parents=True, exist_ok=True)
@@ -352,19 +373,22 @@ class FourDGSEngine(BaseEngine):
             cam_name = f"cam_{idx:02d}"
             cam_dir = images_root / cam_name
 
-            self.log(f"Extraction {vid_path.name} -> {cam_name} ({fps} fps)...")
-            self.status(f"Extraction des frames ({vid_path.name})...")
+            self.log(tr(
+                "fdgs_log_extracting",
+                "Extracting {video} -> {cam} ({fps} fps)...",
+            ).format(video=vid_path.name, cam=cam_name, fps=fps))
+            self.status(tr("fdgs_status_extracting", "Extracting frames ({name})...").format(name=vid_path.name))
             if not self.extract_frames(vid_path, cam_dir, fps, video_trim=video_trim):
                 return False
 
-        self.log("Extraction terminée.")
+        self.log(tr("fdgs_log_extraction_done", "Extraction complete."))
 
         if not self.upscale_dataset_images(str(safe_out)):
             return False
 
         if self.check_nerfstudio():
-            self.log("ns-process-data détecté (venv_4dgs). Lancement du processing Nerfstudio...")
-            self.status("Traitement Nerfstudio en cours...")
+            self.log(tr("fdgs_log_ns_detected", "ns-process-data detected (venv_4dgs). Starting Nerfstudio processing..."))
+            self.status(tr("fdgs_status_nerfstudio", "Nerfstudio processing..."))
 
             # Same static-scene constraint as run_colmap: ns-process-data runs
             # COLMAP internally, so handing it images_root would feed SfM every
@@ -388,10 +412,10 @@ class FourDGSEngine(BaseEngine):
             ]
 
             if self._execute_command(cmd_ns, env=compute_env()) != 0:
-                self.log("Echec ns-process-data.")
+                self.log(tr("fdgs_log_ns_failed", "ns-process-data failed."))
                 return False
 
             return True
         else:
-            self.log("Nerfstudio non trouvé. Lancement mode dégradé (COLMAP manuel uniquement).")
+            self.log(tr("fdgs_log_ns_missing", "Nerfstudio not found. Starting degraded mode (manual COLMAP only)."))
             return self.run_colmap(str(safe_out), **(colmap_params or {}))

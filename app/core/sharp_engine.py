@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .base_engine import BaseEngine
+from .i18n import tr
 from .media import conversion_suffix, convert_image, needs_image_conversion, without_hwaccel
 from .system import compute_env, resolve_binary, resolve_project_root, use_videotoolbox
 
@@ -117,7 +118,7 @@ class SharpEngine(BaseEngine):
         params = params or {}
         cmd = self._get_sharp_cmd()
         if cmd is None:
-            self.log("Sharp n'est pas installé (.venv_sharp introuvable).")
+            self.log(tr("sharp_log_not_installed", "Sharp is not installed (.venv_sharp not found)."))
             return -1
 
         cmd.extend(["predict"])
@@ -125,15 +126,13 @@ class SharpEngine(BaseEngine):
         safe_input = self.validate_path(input_path)
         safe_output = self.validate_path(output_path)
         if safe_input is None:
-            self.log(f"SECURITY: Invalid input path: {os.path.basename(str(input_path))}")
+            self.log(tr("log_invalid_input_path", "SECURITY: Invalid input path: {name}").format(
+                name=os.path.basename(str(input_path))))
             return -1
         if safe_output is None:
-            # Output may not exist yet — check parent
-            out_parent = Path(output_path).parent
-            if self.validate_path(str(out_parent)) is None:
-                self.log(f"SECURITY: Invalid output path: {os.path.basename(str(output_path))}")
-                return -1
-            safe_output = Path(output_path).resolve()
+            self.log(tr("log_invalid_output_path", "SECURITY: Invalid output path: {name}").format(
+                name=os.path.basename(str(output_path))))
+            return -1
 
         # Sharp reads through Pillow, which has no HEIF decoder: convert the
         # iPhone-style formats into a throwaway PNG instead of failing.
@@ -142,15 +141,15 @@ class SharpEngine(BaseEngine):
             staging = Path(tempfile.mkdtemp(prefix="sharp_in_"))
             converted = staging / (safe_input.stem + conversion_suffix("png"))
             if convert_image(safe_input, converted, "png"):
-                self.log(
-                    f"🔄 {safe_input.name} converti en PNG — format non lisible par Sharp. "
-                    f"L'original n'est pas modifié."
-                )
+                self.log(tr(
+                    "sharp_log_converted_png",
+                    "🔄 {name} converted to PNG - format not readable by Sharp. The original is not modified.",
+                ).format(name=safe_input.name))
                 safe_input = converted
             else:
                 shutil.rmtree(staging, ignore_errors=True)
                 staging = None
-                self.log(f"⚠️ Conversion impossible : {safe_input.name}")
+                self.log(tr("sharp_log_convert_failed", "⚠️ Conversion impossible: {name}").format(name=safe_input.name))
 
         cmd.extend(["-i", str(safe_input)])
         cmd.extend(["-o", str(safe_output)])
@@ -161,14 +160,16 @@ class SharpEngine(BaseEngine):
             if safe_ckpt:
                 cmd.extend(["-c", str(safe_ckpt)])
             else:
-                self.log(f"SECURITY: Invalid checkpoint path: {os.path.basename(str(checkpoint))}")
+                self.log(tr("log_invalid_checkpoint_path", "SECURITY: Invalid checkpoint path: {name}").format(
+                    name=os.path.basename(str(checkpoint))))
 
         device = params.get("device", self.device)
         if device == "mps" and not self._mps_usable():
-            self.log(
-                "⚠️ Le GPU Apple (MPS) n'est pas utilisable par le PyTorch de "
-                ".venv_sharp — calcul sur processeur (cpu), plus lent."
-            )
+            self.log(tr(
+                "sharp_log_mps_unusable",
+                "⚠️ The Apple GPU (MPS) cannot be used by the PyTorch in .venv_sharp - "
+                "computing on the CPU (cpu), which is slower.",
+            ))
             device = "cpu"
         if device and device != "default":
             cmd.extend(["--device", device])
@@ -184,7 +185,7 @@ class SharpEngine(BaseEngine):
         # Ensure all args are strings for Popen
         cmd = [str(arg) for arg in cmd]
 
-        self.log(f"Lancement Sharp: {self._redact_cmd(cmd)}")
+        self.log(tr("sharp_log_launch", "Launching Sharp: {cmd}").format(cmd=self._redact_cmd(cmd)))
 
         # GoF Template Method: delegation to the runner
         try:
@@ -229,7 +230,7 @@ class SharpEngine(BaseEngine):
 
         if returncode != 0 and "-hwaccel" in ffmpeg_cmd and not self.stop_requested:
             if log_callback:
-                log_callback("Décodage matériel refusé — nouvelle tentative en logiciel")
+                log_callback(tr("log_hwdecode_retry", "Hardware decoding refused - retrying in software"))
             returncode = self._execute_command(
                 without_hwaccel(ffmpeg_cmd), line_callback=_ffmpeg_line, timeout=3600
             )
@@ -246,10 +247,11 @@ class SharpEngine(BaseEngine):
         """
         estimated_seconds = total_frames * SECONDS_PER_FRAME_ESTIMATE
         if log_callback:
-            log_callback(
-                f"Durée estimée : {_format_duration(estimated_seconds)} "
-                f"({total_frames} images × ~{SECONDS_PER_FRAME_ESTIMATE:.0f} s, inférence séquentielle)."
-            )
+            log_callback(tr(
+                "sharp_log_estimated_duration",
+                "Estimated duration: {duration} ({frames} images × ~{secs:.0f} s, sequential inference).",
+            ).format(duration=_format_duration(estimated_seconds), frames=total_frames,
+                     secs=SECONDS_PER_FRAME_ESTIMATE))
         if confirm_callback and estimated_seconds >= LONG_RUN_CONFIRM_SECONDS:
             return bool(confirm_callback(total_frames, estimated_seconds))
         return True
@@ -273,7 +275,7 @@ class SharpEngine(BaseEngine):
                     dest_ply = out / f"{frame_path.stem}.ply"
                     shutil.copy2(ply_files[0], dest_ply)
                     if log_callback:
-                        log_callback(f"Saved: {dest_ply.name}")
+                        log_callback(tr("sharp_log_saved", "Saved: {name}").format(name=dest_ply.name))
                     saved = True
         finally:
             if frame_out_dir.exists():
@@ -340,19 +342,19 @@ class SharpEngine(BaseEngine):
 
         returncode = self._extract_frames(vp, frames_dir, skip, log_callback)
         if self.stop_requested:
-            return _abort("--- Arrêté par l'utilisateur ---")
+            return _abort(tr("log_stopped_by_user", "--- Stopped by user ---"))
         if returncode != 0:
             return _abort()
 
         frames = sorted(frames_dir.glob("*.png"))
         total_frames = len(frames)
         if total_frames == 0:
-            return _abort("Aucune frame extraite.")
+            return _abort(tr("sharp_log_no_frames", "No frames extracted."))
         if log_callback:
-            log_callback(f"Total frames extraites: {total_frames}")
+            log_callback(tr("sharp_log_total_frames", "Total frames extracted: {n}").format(n=total_frames))
 
         if not self._confirm_long_run(total_frames, log_callback, confirm_callback):
-            return _abort("--- Annulé avant le démarrage ---")
+            return _abort(tr("log_cancelled_before_start", "--- Cancelled before start ---"))
 
         success_count = 0
         # try/finally: an exception from one frame (disk full on copy2...)
@@ -363,14 +365,16 @@ class SharpEngine(BaseEngine):
                 # testing only the latter left stop() unable to interrupt the loop.
                 if self.stop_requested or (cancel_check and cancel_check()):
                     if log_callback:
-                        log_callback("--- Arrêté par l'utilisateur ---")
+                        log_callback(tr("log_stopped_by_user", "--- Stopped by user ---"))
                     break
 
                 display_idx = idx + 1
                 if status_callback:
-                    status_callback(f"Processing frame {display_idx}/{total_frames}")
+                    status_callback(tr("sharp_status_frame", "Processing frame {idx}/{total}").format(
+                        idx=display_idx, total=total_frames))
                 if log_callback:
-                    log_callback(f"Processing frame {display_idx}/{total_frames}: {frame_path.name}")
+                    log_callback(tr("sharp_log_frame", "Processing frame {idx}/{total}: {name}").format(
+                        idx=display_idx, total=total_frames, name=frame_path.name))
 
                 if self._predict_one_frame(frame_path, out, params, log_callback):
                     success_count += 1

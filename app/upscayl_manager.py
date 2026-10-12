@@ -223,6 +223,100 @@ def _extract_archive(archive: Path, bin_dest: Path, models_dest: Path, log):
         log(f"Unknown archive format: {archive.name}")
 
 
+def _validate_model(params, log):
+    """Resolve the model to use. Returns ``(model_id, models_dir)`` or None.
+
+    ``models_dir`` is None when no models folder is known (upscayl-bin then
+    falls back to its own default). Failures are reported through ``log``.
+    """
+    model_id = params.get("model_id", "")
+    if not model_id:
+        log("❌ Aucun modèle upscayl sélectionné.")
+        return None
+
+    models_dir = params.get("models_dir") or get_effective_models_dir()
+    if models_dir:
+        models_dir = Path(models_dir)
+        if not (models_dir / f"{model_id}.bin").exists():
+            # Retired ids (e.g. RealESRGAN_General_x4_v3) resolve to the entry
+            # whose files are actually on disk.
+            from app.upscayl_models import get_model
+            known = get_model(model_id)
+            if known and known.id != model_id:
+                model_id = known.id
+        if not (models_dir / f"{model_id}.bin").exists() or \
+                not (models_dir / f"{model_id}.param").exists():
+            log(f"❌ Modèle introuvable : {model_id} (.bin/.param manquant dans {models_dir})")
+            return None
+    return model_id, models_dir
+
+
+def _build_cmd(binary, input_path, output_path, model_id, models_dir, params):
+    """Assemble the upscayl-bin argv, minus the ``-t`` tile option."""
+    scale       = params.get("scale", 4)
+    fmt         = params.get("format", "png")
+    tta         = params.get("tta", False)
+    compression = params.get("compression", 0)
+
+    cmd_base = [str(binary), "-i", str(input_path), "-o", str(output_path),
+                "-n", model_id, "-s", str(scale), "-f", fmt]
+    if models_dir:
+        models_arg = os.path.relpath(str(models_dir), str(Path(binary).parent))
+        cmd_base += ["-m", models_arg]
+    if tta:
+        cmd_base.append("-x")
+    if compression > 0 and fmt in ("jpg", "webp"):
+        cmd_base += ["-c", str(compression)]
+    return cmd_base
+
+
+def _run_attempt(cmd, log, cancel_check):
+    """Run one upscayl-bin invocation. Returns ``(success, crashed, abort)``.
+
+    ``crashed`` is True when the process was killed by a signal (worth a retry
+    with a smaller tile); ``abort`` is True when retrying makes no sense
+    (user cancellation or an unexpected exception).
+    """
+    log(f"upscayl-bin: {' '.join(cmd)}")
+    proc = None
+    try:
+        # errors="replace": a non-UTF-8 byte in upscayl-bin's output must not
+        # abort the read loop with UnicodeDecodeError mid-run.
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            errors="replace",
+        )
+        for line in proc.stdout:
+            if cancel_check and cancel_check():
+                proc.terminate()
+                log("⚠ Upscale interrompu par l'utilisateur.")
+                break
+            log(line.rstrip())
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            log("⚠ upscayl-bin ne répond pas après SIGTERM — envoi de SIGKILL.")
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                log("❌ Impossible de terminer upscayl-bin.")
+        cancelled = bool(cancel_check and cancel_check())
+        success = (proc.returncode == 0) and not cancelled
+        crashed = False
+        if proc.returncode != 0 and not cancelled:
+            log(f"❌ upscayl-bin a retourné le code {proc.returncode}")
+            crashed = proc.returncode < 0
+        return success, crashed, cancelled
+    except Exception as e:
+        log(f"❌ Exception upscayl : {e}")
+        # Never leave upscayl-bin running (and the GPU busy) behind us.
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        return False, False, True
+
+
 def run_upscayl(input_path, output_path, params,
                 log_callback=None, progress_callback=None,  # noqa: ARG001 - part of the callback quartet
                 done_callback=None, cancel_check=None):
@@ -245,107 +339,39 @@ def run_upscayl(input_path, output_path, params,
         if log_callback:
             log_callback(msg)
 
+    def _finish(ok):
+        if done_callback:
+            done_callback(ok)
+
     binary = params.get("bin_path") or find_binary()
     if not binary or not os.access(str(binary), os.X_OK):
         _log("❌ upscayl-bin introuvable ou non exécutable.")
-        if done_callback:
-            done_callback(False)
+        _finish(False)
         return
 
-    model_id = params.get("model_id", "")
-    if not model_id:
-        _log("❌ Aucun modèle upscayl sélectionné.")
-        if done_callback:
-            done_callback(False)
+    resolved = _validate_model(params, _log)
+    if resolved is None:
+        _finish(False)
         return
-
-    models_dir = params.get("models_dir") or get_effective_models_dir()
-    if models_dir:
-        models_dir = Path(models_dir)
-        if not (models_dir / f"{model_id}.bin").exists():
-            # Retired ids (e.g. RealESRGAN_General_x4_v3) resolve to the entry
-            # whose files are actually on disk.
-            from app.upscayl_models import get_model
-            known = get_model(model_id)
-            if known and known.id != model_id:
-                model_id = known.id
-        if not (models_dir / f"{model_id}.bin").exists() or \
-                not (models_dir / f"{model_id}.param").exists():
-            _log(f"❌ Modèle introuvable : {model_id} (.bin/.param manquant dans {models_dir})")
-            if done_callback:
-                done_callback(False)
-            return
+    model_id, models_dir = resolved
 
     Path(output_path).mkdir(parents=True, exist_ok=True)
 
-    scale       = params.get("scale", 4)
-    fmt         = params.get("format", "png")
-    tile        = params.get("tile", 0)
-    tta         = params.get("tta", False)
-    compression = params.get("compression", 0)
-
-    cmd_base = [str(binary), "-i", str(input_path), "-o", str(output_path),
-                "-n", model_id, "-s", str(scale), "-f", fmt]
-    if models_dir:
-        models_arg = os.path.relpath(str(models_dir), str(Path(binary).parent))
-        cmd_base += ["-m", models_arg]
-    if tta:
-        cmd_base.append("-x")
-    if compression > 0 and fmt in ("jpg", "webp"):
-        cmd_base += ["-c", str(compression)]
+    cmd_base = _build_cmd(binary, input_path, output_path, model_id, models_dir, params)
 
     # Tile sizes to try, largest first. A crash (killed by signal, e.g. SIGBUS
     # from a GPU out-of-memory condition) triggers a retry with a smaller
     # tile instead of failing outright — tile=0 is never retried since it
     # disables tiling entirely and is the most crash-prone setting.
+    tile = params.get("tile", 0)
     tile_attempts = [tile] if tile > 0 else [1024]
     while tile_attempts[-1] > 128:
         tile_attempts.append(tile_attempts[-1] // 2)
 
     success = False
     for attempt, cur_tile in enumerate(tile_attempts):
-        cmd = cmd_base + ["-t", str(cur_tile)]
-        _log(f"upscayl-bin: {' '.join(cmd)}")
-        crashed = False
-        proc = None
-        try:
-            # errors="replace": a non-UTF-8 byte in upscayl-bin's output must not
-            # abort the read loop with UnicodeDecodeError mid-run.
-            proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                errors="replace",
-            )
-            for line in proc.stdout:
-                if cancel_check and cancel_check():
-                    proc.terminate()
-                    _log("⚠ Upscale interrompu par l'utilisateur.")
-                    break
-                _log(line.rstrip())
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                _log("⚠ upscayl-bin ne répond pas après SIGTERM — envoi de SIGKILL.")
-                proc.kill()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    _log("❌ Impossible de terminer upscayl-bin.")
-            cancelled = bool(cancel_check and cancel_check())
-            success = (proc.returncode == 0) and not cancelled
-            if proc.returncode != 0 and not cancelled:
-                _log(f"❌ upscayl-bin a retourné le code {proc.returncode}")
-                crashed = proc.returncode < 0
-            if cancelled:
-                break
-        except Exception as e:
-            _log(f"❌ Exception upscayl : {e}")
-            # Never leave upscayl-bin running (and the GPU busy) behind us.
-            if proc is not None and proc.poll() is None:
-                proc.kill()
-                proc.wait()
-            break
-
-        if success or not crashed:
+        success, crashed, abort = _run_attempt(cmd_base + ["-t", str(cur_tile)], _log, cancel_check)
+        if abort or success or not crashed:
             break
         if attempt + 1 < len(tile_attempts):
             _log(
@@ -353,8 +379,7 @@ def run_upscayl(input_path, output_path, params,
                 f"tile réduit à {tile_attempts[attempt + 1]}px."
             )
 
-    if done_callback:
-        done_callback(success)
+    _finish(success)
 
 
 def resize_to_original(upscaled_dir, original_sizes_dict):

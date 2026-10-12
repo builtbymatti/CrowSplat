@@ -18,14 +18,11 @@ from app.scripts.installers.tools import (
     check_cmake_ninja,
     check_node,
     check_xcode_tools,
-    get_local_version,
-    get_remote_version,
     install_node_js,
     install_rust_toolchain,
     install_system_dependencies,
     load_config,
     relax_requirements,
-    save_local_version,
 )
 from app.scripts.installers.upscayl import UpscaylEngineDep
 
@@ -47,9 +44,6 @@ __all__ = [
     # Utility functions
     "load_config",
     "relax_requirements",
-    "get_remote_version",
-    "get_local_version",
-    "save_local_version",
     "check_cargo",
     "check_brew",
     "check_node",

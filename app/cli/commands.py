@@ -27,6 +27,21 @@ from app.core.system import get_brush_build_mode
 from app.gui.chaining_logic import find_checkpoint_plys, is_checkpoint_ply, resolve_checkpoints_dir
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Output helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _t(key, default, **kwargs):
+    """Translate ``key`` and fill its named placeholders."""
+    return tr(key, default).format(**kwargs)
+
+
+def _print_kv(*pairs):
+    """Print aligned ``  Label : value`` lines from ``(label_key, default, value)`` triples."""
+    for key, default, value in pairs:
+        print(f"  {tr(key, default):<12}: {value}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Run functions
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -169,11 +184,11 @@ def _handle_ply_rename(output_path, params, log=print):
         dest_path = output_path / ply_name
         try:
             shutil.move(str(found_ply), str(dest_path))
-            log(f"Fichier PLY renommé en : {ply_name}")
+            log(_t("cli_ply_renamed", "PLY file renamed to: {name}", name=ply_name))
         except OSError as e:
-            log(f"Erreur renommage PLY: {e}")
+            log(_t("cli_ply_rename_error", "PLY rename error: {err}", err=e))
     else:
-        log("Attention: Aucun fichier PLY trouvé à renommer.")
+        log(tr("cli_ply_rename_none", "Warning: no PLY file found to rename."))
 
 
 def _apply_refine_mode(dataset_root, output_path, params, log=print):
@@ -196,23 +211,23 @@ def _apply_refine_mode(dataset_root, output_path, params, log=print):
     try:
         result = prepare_refine_environment(dataset_root, log=log)
     except RefineEnvironmentError as e:
-        print(f"Erreur : {e}")
+        print(_t("cli_generic_error", "Error: {err}", err=e))
         sys.exit(1)
 
-    if isinstance(result, _Path):
+    refine_dir, latest_ply = result
+    if latest_ply is None:
         # No checkpoint found: refine mode is a no-op, train normally.
         return str(dataset_root), str(output_path)
 
-    refine_dir, latest_ply = result
     refine_output = refine_dir / "checkpoints"
     refine_output.mkdir(parents=True, exist_ok=True)
-    log(f"Dossier de travail redirigé vers: {refine_dir}")
+    log(_t("cli_refine_redirected", "Working folder redirected to: {path}", path=refine_dir))
 
     if params.get("start_iter", 0) == 0:
         total_steps = params.get("total_steps", 30000)
         detected_iter = detect_refine_start_iteration(latest_ply, total_steps)
         params["start_iter"] = detected_iter
-        log(f"Refine: Start Iteration réglé sur {detected_iter}")
+        log(_t("cli_refine_start_iter", "Refine: start iteration set to {n}", n=detected_iter))
 
     return str(refine_dir), str(refine_output)
 
@@ -256,6 +271,16 @@ def _build_brush_params(args) -> dict:
     return params
 
 
+def _print_brush_settings(preset, params):
+    """Echo the effective Brush settings (shared by ``brush`` and ``pipeline``)."""
+    _print_kv(
+        ("cli_lbl_preset", "Preset", preset),
+        ("cli_lbl_steps", "Steps", params["total_steps"]),
+        ("cli_lbl_sh_degree", "SH degree", params["sh_degree"]),
+        ("cli_lbl_device", "Device", params["device"]),
+    )
+
+
 def run_brush(args):
     params = _build_brush_params(args)
     if args.custom_args:
@@ -264,10 +289,7 @@ def run_brush(args):
     print(tr("cli_start_brush"))
     print(tr("cli_input", args.input))
     print(tr("cli_output", args.output))
-    print(f"  Preset     : {args.preset}")
-    print(f"  Steps      : {params['total_steps']}")
-    print(f"  SH degree  : {params['sh_degree']}")
-    print(f"  Device     : {params['device']}")
+    _print_brush_settings(args.preset, params)
 
     engine = BrushEngine(logger_callback=print)
 
@@ -354,7 +376,7 @@ def run_sharp(args):
         # Mirrors the GUI: SharpVideoWorker never reads "upscale" either — the
         # pre-upscale step only exists for the single-image path.
         if getattr(args, "upscale", False):
-            print("⚠ --upscale n'est pas pris en charge en mode vidéo — ignoré.")
+            print(tr("cli_sharp_upscale_video_ignored", "⚠ --upscale is not supported in video mode - ignored."))
         _run_sharp_video(args, engine, params)
 
 
@@ -364,7 +386,7 @@ def _run_sharp_video(args, engine, params):
     output_dir = _Path(args.output)
     skip = max(1, args.skip_frames)
 
-    print(f"Sharp vidéo : {video_path.name} (1 frame / {skip})")
+    print(_t("cli_sharp_video", "Sharp video: {name} (1 frame / {skip})", name=video_path.name, skip=skip))
     print(tr("cli_output", args.output))
 
     params["skip_frames"] = skip
@@ -384,7 +406,7 @@ def _run_sharp_video(args, engine, params):
         engine.stop()
         sys.exit(130)
 
-    print(f"Terminé : {success_count} frames converties.")
+    print(_t("cli_sharp_video_done", "Done: {n} frames converted.", n=success_count))
     if success_count == 0:
         sys.exit(1)
 
@@ -427,8 +449,8 @@ def run_supersplat(args):
     if url_params:
         url += "?" + "&".join(url_params)
 
-    print(f"\nAccédez à : {url}\n")
-    print("Appuyez sur Ctrl+C pour arrêter les serveurs.")
+    print("\n" + _t("cli_open_url", "Open: {url}", url=url) + "\n")
+    print(tr("cli_ctrl_c_hint", "Press Ctrl+C to stop the servers."))
 
     try:
         while True:
@@ -445,7 +467,7 @@ def run_upscale(args):
     engine = UpscaleEngine(logger_callback=print)
 
     if not engine.is_installed():
-        print("Erreur : upscayl-bin introuvable. Installez-le depuis l'onglet Upscale de l'interface graphique.")
+        print(tr("cli_upscale_no_binary", "Error: upscayl-bin not found. Install it from the Upscale tab of the graphical interface."))
         sys.exit(1)
 
     upsampler = engine.load_model(
@@ -457,15 +479,17 @@ def run_upscale(args):
         compression=args.compression,
     )
     if not upsampler:
-        print("Erreur : impossible de charger le modèle.")
+        print(tr("cli_upscale_no_model", "Error: unable to load the model."))
         sys.exit(1)
 
     input_path = _Path(args.input)
     output_path = _Path(args.output)
 
-    print(f"Upscale x{args.scale} — modèle : {args.model}")
-    print(f"  Input  : {args.input}")
-    print(f"  Output : {args.output}")
+    print(_t("cli_upscale_header", "Upscale x{scale} - model: {model}", scale=args.scale, model=args.model))
+    _print_kv(
+        ("cli_lbl_input", "Input", args.input),
+        ("cli_lbl_output", "Output", args.output),
+    )
 
     try:
         if input_path.is_dir():
@@ -475,12 +499,13 @@ def run_upscale(args):
             )
         else:
             success = engine.upscale_image(str(input_path), str(output_path / input_path.name), upsampler)
-            msg = "Upscale terminé." if success else "Upscale échoué."
+            msg = tr("up_msg_complete", "Upscale complete.") if success else tr("up_err_failed", "Upscale failed.")
     except KeyboardInterrupt:
         print(tr("cli_stopping"))
         sys.exit(130)
 
-    print(f"{'Succès' if success else 'Erreur'} : {msg}")
+    key, default = ("cli_result_ok", "Success: {msg}") if success else ("cli_result_err", "Error: {msg}")
+    print(_t(key, default, msg=msg))
     if not success:
         sys.exit(1)
 
@@ -495,35 +520,37 @@ def run_4dgs(args):
     # actually needs it (audit L4-09b).
     if not args.colmap_only:
         if not args.input:
-            print("Erreur : --input est requis (sauf en mode --colmap_only).")
+            print(tr("cli_4dgs_input_required", "Error: --input is required (except in --colmap_only mode)."))
             sys.exit(1)
         if not _Path(args.input).exists():
-            print(f"Erreur : dossier source introuvable : {args.input}")
+            print(_t("cli_4dgs_input_missing", "Error: source folder not found: {path}", path=args.input))
             sys.exit(1)
 
-    print("Préparation dataset 4DGS")
-    print(f"  Input  : {args.input}")
-    print(f"  Output : {args.output}")
+    print(tr("cli_4dgs_prep", "4DGS dataset preparation"))
+    _print_kv(
+        ("cli_lbl_input", "Input", args.input),
+        ("cli_lbl_output", "Output", args.output),
+    )
 
     try:
         if args.colmap_only:
-            print("Mode COLMAP uniquement.")
+            print(tr("cli_4dgs_colmap_only", "COLMAP-only mode."))
             success = engine.run_colmap(args.output)
         else:
-            print(f"  FPS    : {args.fps}")
+            _print_kv(("cli_lbl_fps", "FPS", args.fps))
             success = engine.process_dataset(args.input, args.output, fps=args.fps)
     except KeyboardInterrupt:
         print(tr("cli_stopping"))
         engine.stop()
         sys.exit(130)
 
-    print("Terminé avec succès." if success else "Erreur lors du traitement.")
+    print(tr("cli_done_ok", "Completed successfully.") if success else tr("cli_4dgs_failed", "Error during processing."))
     if not success:
         sys.exit(1)
 
 
-def run_clean(args):
-    """Clean one .ply file, or every .ply of a folder."""
+def _clean_overrides(args):
+    """Collect the explicitly given cleaning thresholds."""
     overrides = {}
     if args.opacity_min is not None:
         overrides["opacity_min"] = args.opacity_min
@@ -531,97 +558,118 @@ def run_clean(args):
         overrides["scale_pct"] = args.scale_pct
     if args.outlier_pct is not None:
         overrides["outlier_pct"] = args.outlier_pct
+    return overrides
+
+
+def _clean_folder(args, input_path, output_path, overrides):
+    """Folder mode: clean every .ply of ``input_path`` into ``output_path``."""
+    print(_t("cli_clean_batch", "Batch cleaning: {src} → {dst}", src=input_path, dst=output_path))
+    _print_kv(
+        ("cli_lbl_severity", "Severity", args.strength),
+        ("cli_lbl_recursive", "Recursive", tr("cli_yes", "yes") if args.recursive else tr("cli_no", "no")),
+    )
+    if overrides:
+        _print_kv(("cli_lbl_overrides", "Overrides", overrides))
+
+    try:
+        all_stats = clean_ply_batch(
+            input_path, output_path,
+            strength=args.strength, overrides=overrides or None,
+            log=print, recursive=args.recursive,
+        )
+        success = sum(1 for s in all_stats if "error" not in s)
+        failed = len(all_stats) - success
+        for s in all_stats:
+            if "error" in s:
+                print(_t("cli_clean_item_err", "  ✗ {file}: {err}", file=s["file"], err=s["error"]))
+            else:
+                print(_t("cli_clean_item_ok", "  ✓ {file}: {kept}/{total} splats kept",
+                         file=s["file"], kept=s["kept"], total=s["total"]))
+        print(_t("cli_clean_batch_done", "Done: {ok} succeeded, {failed} failed.", ok=success, failed=failed))
+        if failed > 0:
+            sys.exit(1)
+    except ValueError as e:
+        print(_t("cli_generic_error", "Error: {err}", err=e))
+        sys.exit(1)
+
+
+def _clean_single(args, overrides):
+    """Single file mode."""
+    print(_t("cli_clean_single", "PLY cleaning: {src} → {dst}", src=args.input, dst=args.output))
+    _print_kv(("cli_lbl_severity", "Severity", args.strength))
+    if overrides:
+        _print_kv(("cli_lbl_overrides", "Overrides", overrides))
+
+    try:
+        stats = clean_ply(args.input, args.output, strength=args.strength, overrides=overrides or None, log=print)
+        print(_t("cli_clean_single_done", "Done: {kept}/{total} splats kept ({removed} removed)",
+                 kept=stats["kept"], total=stats["total"], removed=stats["removed"]))
+    except (ValueError, FileNotFoundError) as e:
+        print(_t("cli_generic_error", "Error: {err}", err=e))
+        sys.exit(1)
+
+
+def _chain_export_after_clean(args, input_path):
+    """Optional chaining: Clean → Export (``--then_export``)."""
+    from app.core.export_engine import ExportEngine
+
+    then_format = args.then_export
+    export_output = args.export_output
+
+    # Determine the files to export
+    if input_path.is_dir():
+        # clean_ply_batch() mirrors the input tree into the output folder
+        # when --recursive is set (ply_cleaner.py), so cleaned files can
+        # live in sub-folders. A non-recursive glob here silently dropped
+        # them from the export (audit L4-05).
+        glob_pattern = "**/*.ply" if args.recursive else "*.ply"
+        export_sources = sorted(_Path(args.output).glob(glob_pattern))
+        export_root = _Path(export_output) if export_output else _Path(args.output)
+        msg_sources = _t("cli_files_in_dir", "{n} files in {dir}", n=len(export_sources), dir=args.output)
+    else:
+        export_sources = [_Path(args.output)]
+        export_root = _Path(export_output) if export_output else _Path(args.output).parent
+        msg_sources = str(args.output)
+
+    print("\n" + tr("cli_chain_header", "── Clean → Export chaining ──"))
+    _print_kv(
+        ("cli_lbl_format", "Format", then_format),
+        ("cli_lbl_sources", "Sources", msg_sources),
+        ("cli_lbl_dest", "Dest.", export_root),
+    )
+
+    engine = ExportEngine(logger_callback=print)
+    success_count = 0
+    for src in export_sources:
+        if src.exists():
+            ok = engine.export(str(src), str(export_root), then_format)
+            if ok:
+                success_count += 1
+                print(_t("cli_export_item_ok", "  ✓ {name} → {fmt}", name=src.name, fmt=then_format))
+            else:
+                print(_t("cli_export_item_fail", "  ✗ {name} → failed", name=src.name))
+        else:
+            print(_t("cli_export_item_missing", "  ⚠️  {name} not found - skipped", name=src.name))
+
+    print(_t("cli_export_done", "Export finished: {ok}/{total} succeeded.", ok=success_count, total=len(export_sources)))
+    if success_count < len(export_sources):
+        sys.exit(1)
+
+
+def run_clean(args):
+    """Clean one .ply file, or every .ply of a folder."""
+    overrides = _clean_overrides(args)
 
     input_path = _Path(args.input)
     output_path = _Path(args.output)
 
-    # Folder mode: input and output are folders
     if input_path.is_dir():
-        print(f"Nettoyage par lots : {input_path} → {output_path}")
-        print(f"  Sévérité : {args.strength}")
-        print(f"  Récursif : {'oui' if args.recursive else 'non'}")
-        if overrides:
-            print(f"  Surcharges : {overrides}")
-
-        try:
-            all_stats = clean_ply_batch(
-                input_path, output_path,
-                strength=args.strength, overrides=overrides or None,
-                log=print, recursive=args.recursive,
-            )
-            success = sum(1 for s in all_stats if "error" not in s)
-            failed = len(all_stats) - success
-            for s in all_stats:
-                if "error" in s:
-                    print(f"  ✗ {s['file']}: {s['error']}")
-                else:
-                    print(f"  ✓ {s['file']}: {s['kept']}/{s['total']} splats conservés")
-            print(f"Terminé : {success} réussis, {failed} échoués.")
-            if failed > 0:
-                sys.exit(1)
-        except ValueError as e:
-            print(f"Erreur : {e}")
-            sys.exit(1)
+        _clean_folder(args, input_path, output_path, overrides)
     else:
-        # Single file mode (existing behaviour)
-        print(f"Nettoyage PLY : {args.input} → {args.output}")
-        print(f"  Sévérité : {args.strength}")
-        if overrides:
-            print(f"  Surcharges : {overrides}")
+        _clean_single(args, overrides)
 
-        try:
-            stats = clean_ply(args.input, args.output, strength=args.strength, overrides=overrides or None, log=print)
-            print(f"Terminé : {stats['kept']}/{stats['total']} splats conservés ({stats['removed']} retirés)")
-        except ValueError as e:
-            print(f"Erreur : {e}")
-            sys.exit(1)
-        except FileNotFoundError as e:
-            print(f"Erreur : {e}")
-            sys.exit(1)
-
-    # ── Optional chaining: Clean → Export ────────────────────────────────
     if getattr(args, "then_export", None):
-        from app.core.export_engine import ExportEngine
-
-        then_format = args.then_export
-        export_output = args.export_output
-
-        # Determine the files to export
-        if input_path.is_dir():
-            # clean_ply_batch() mirrors the input tree into the output folder
-            # when --recursive is set (ply_cleaner.py), so cleaned files can
-            # live in sub-folders. A non-recursive glob here silently dropped
-            # them from the export (audit L4-05).
-            glob_pattern = "**/*.ply" if args.recursive else "*.ply"
-            export_sources = sorted(_Path(args.output).glob(glob_pattern))
-            export_root = _Path(export_output) if export_output else _Path(args.output)
-            msg_sources = f"{len(export_sources)} fichiers dans {args.output}"
-        else:
-            export_sources = [_Path(args.output)]
-            export_root = _Path(export_output) if export_output else _Path(args.output).parent
-            msg_sources = str(args.output)
-
-        print("\n── Chaînage Clean → Export ──")
-        print(f"  Format   : {then_format}")
-        print(f"  Sources  : {msg_sources}")
-        print(f"  Destin.  : {export_root}")
-
-        engine = ExportEngine(logger_callback=print)
-        success_count = 0
-        for src in export_sources:
-            if src.exists():
-                ok = engine.export(str(src), str(export_root), then_format)
-                if ok:
-                    success_count += 1
-                    print(f"  ✓ {src.name} → {then_format}")
-                else:
-                    print(f"  ✗ {src.name} → échec")
-            else:
-                print(f"  ⚠️  {src.name} introuvable — ignoré")
-
-        print(f"Export terminé : {success_count}/{len(export_sources)} réussis.")
-        if success_count < len(export_sources):
-            sys.exit(1)
+        _chain_export_after_clean(args, input_path)
 
 
 def run_splat_transform(args):
@@ -631,18 +679,19 @@ def run_splat_transform(args):
     engine = SplatTransformEngine(logger_callback=print)
 
     if not engine.is_available():
-        print(
+        print(tr(
+            "cli_st_not_found",
             "Error: splat-transform not found.\n"
             "Install it by running:  python3 app/scripts/setup_dependencies.py\n"
-            "or manually:  cd engines/splat-transform && npm install @playcanvas/splat-transform"
-        )
+            "or manually:  cd engines/splat-transform && npm install @playcanvas/splat-transform",
+        ))
         sys.exit(1)
 
     input_path = _Path(args.input)
     output_dir = _Path(args.output)
 
     if not input_path.exists():
-        print(f"Error: input file not found: {input_path}")
+        print(_t("cli_st_input_missing", "Error: input file not found: {path}", path=input_path))
         sys.exit(1)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -659,10 +708,10 @@ def run_splat_transform(args):
         params["--morton-order"] = True
 
     print(f"SplatTransform: {input_path} → {output_file}")
-    print(f"  Format  : {args.format}")
+    _print_kv(("cli_lbl_format", "Format", args.format))
     shown = [k if v is True else f"{k} {v}" for k, v in params.items() if k != "--overwrite"]
     if shown:
-        print(f"  Options : {', '.join(shown)}")
+        _print_kv(("cli_lbl_options", "Options", ", ".join(shown)))
 
     try:
         returncode = engine.transform(str(input_path), str(output_file), params)
@@ -684,7 +733,7 @@ def run_extract360(args):
     engine = Extractor360Engine(logger_callback=print)
 
     if not engine.is_installed():
-        print("Erreur : Extracteur 360° non installé. Activez-le depuis l'onglet 360° de l'interface graphique.")
+        print(tr("cli_x360_not_installed", "Error: 360° extractor not installed. Enable it from the 360° tab of the graphical interface."))
         sys.exit(1)
 
     params = {
@@ -700,25 +749,27 @@ def run_extract360(args):
         "motion_threshold": args.motion_threshold,
     }
 
-    print("Extraction vidéo 360°")
-    print(f"  Input       : {args.input}")
-    print(f"  Output      : {args.output}")
-    print(f"  Interval    : {args.interval}s")
-    print(f"  Résolution  : {args.resolution}px")
-    print(f"  Caméras     : {args.camera_count}")
+    print(tr("cli_x360_header", "360° video extraction"))
+    _print_kv(
+        ("cli_lbl_input", "Input", args.input),
+        ("cli_lbl_output", "Output", args.output),
+        ("cli_lbl_interval", "Interval", f"{args.interval}s"),
+        ("cli_lbl_resolution", "Resolution", f"{args.resolution}px"),
+        ("cli_lbl_cameras", "Cameras", args.camera_count),
+    )
 
     try:
         success = engine.run_extraction(
             args.input, args.output, params,
             log_callback=print,
-            progress_callback=lambda x: print(f"  Progression : {x}%"),
+            progress_callback=lambda x: print("  " + tr("cli_progression", x)),
         )
     except KeyboardInterrupt:
         print(tr("cli_stopping"))
         engine.stop()
         sys.exit(130)
 
-    print("Terminé avec succès." if success else "Erreur lors de l'extraction.")
+    print(tr("cli_done_ok", "Completed successfully.") if success else tr("cli_x360_failed", "Error during extraction."))
     if not success:
         sys.exit(1)
 
@@ -727,20 +778,22 @@ def _sep(title):
     print(f"\n{'─' * 50}\n  {title}\n{'─' * 50}")
 
 
-def run_pipeline(args):
-    """Pipeline COLMAP → Brush, puis Nettoyage et Export si demandés."""
-    # Step count depends on the opt-in flags, so the headers do not promise
-    # "1/2" while four steps are about to run.
-    total_steps = 2 + bool(getattr(args, "clean", None)) + bool(getattr(args, "export", None))
+def _step_title(index, total, key, default):
+    """``Step i/n - <title>`` header text for the pipeline."""
+    return _t("cli_step_header", "Step {i}/{n} - {title}", i=index, n=total, title=tr(key, default))
 
-    # ── Step 1: COLMAP ────────────────────────────────────────────────────────
-    _sep(f"Étape 1/{total_steps} — Reconstruction COLMAP")
-    print(f"  Input       : {args.input}")
-    print(f"  Output      : {args.output}")
-    print(f"  Projet      : {args.project_name}")
-    print(f"  Type        : {args.type}")
+
+def _pipeline_colmap_step(args, total_steps):
+    """Step 1 of ``pipeline``: COLMAP. Returns the dataset path."""
+    _sep(_step_title(1, total_steps, "cli_step_colmap", "COLMAP reconstruction"))
+    _print_kv(
+        ("cli_lbl_input", "Input", args.input),
+        ("cli_lbl_output", "Output", args.output),
+        ("cli_lbl_project", "Project", args.project_name),
+        ("cli_lbl_type", "Type", args.type),
+    )
     if args.type == "video":
-        print(f"  FPS         : {args.fps}")
+        _print_kv(("cli_lbl_fps", "FPS", args.fps))
 
     colmap_params = _build_colmap_params(args)
 
@@ -748,7 +801,7 @@ def run_pipeline(args):
         colmap_params, args.input, args.output, args.type, args.fps,
         project_name=args.project_name,
         logger_callback=print,
-        progress_callback=lambda x: print(f"  Progression : {x}%"),
+        progress_callback=lambda x: print("  " + tr("cli_progression", x)),
     )
 
     try:
@@ -759,14 +812,17 @@ def run_pipeline(args):
         sys.exit(130)
 
     if not success:
-        print(f"\nErreur COLMAP : {msg}")
+        print("\n" + _t("cli_colmap_error", "COLMAP error: {msg}", msg=msg))
         sys.exit(1)
 
     dataset_path = _Path(args.output) / args.project_name
-    print(f"\nDataset prêt : {dataset_path}")
+    print("\n" + _t("cli_dataset_ready", "Dataset ready: {path}", path=dataset_path))
+    return dataset_path
 
-    # ── Step 2: Brush ─────────────────────────────────────────────────────────
-    _sep(f"Étape 2/{total_steps} — Entraînement Brush")
+
+def _pipeline_brush_step(args, dataset_path, total_steps):
+    """Step 2 of ``pipeline``: Brush. Returns ``(checkpoints_dir, brush_params)``."""
+    _sep(_step_title(2, total_steps, "cli_step_brush", "Brush training"))
 
     brush_params = _build_brush_params(args)
 
@@ -782,12 +838,11 @@ def run_pipeline(args):
     checkpoints_dir = _Path(checkpoints_dir)
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"  Dataset     : {dataset_path}")
-    print(f"  Checkpoints : {checkpoints_dir}")
-    print(f"  Preset      : {args.preset}")
-    print(f"  Steps       : {brush_params['total_steps']}")
-    print(f"  SH degree   : {brush_params['sh_degree']}")
-    print(f"  Device      : {brush_params['device']}")
+    _print_kv(
+        ("cli_lbl_dataset", "Dataset", dataset_path),
+        ("cli_lbl_checkpoints", "Checkpoints", checkpoints_dir),
+    )
+    _print_brush_settings(args.preset, brush_params)
 
     brush_engine = BrushEngine(logger_callback=print)
 
@@ -807,10 +862,21 @@ def run_pipeline(args):
         sys.exit(130)
 
     if returncode != 0:
-        print(f"\nBrush a retourné une erreur (code {returncode}).")
+        print("\n" + _t("cli_brush_error", "Brush returned an error (code {code}).", code=returncode))
         sys.exit(1)
 
-    print(f"\nEntraînement terminé. Splat disponible dans : {checkpoints_dir}")
+    print("\n" + _t("cli_training_done", "Training finished. Splat available in: {path}", path=checkpoints_dir))
+    return checkpoints_dir, brush_params
+
+
+def run_pipeline(args):
+    """COLMAP → Brush pipeline, then cleaning and export when requested."""
+    # Step count depends on the opt-in flags, so the headers do not promise
+    # "1/2" while four steps are about to run.
+    total_steps = 2 + bool(getattr(args, "clean", None)) + bool(getattr(args, "export", None))
+
+    dataset_path = _pipeline_colmap_step(args, total_steps)
+    checkpoints_dir, brush_params = _pipeline_brush_step(args, dataset_path, total_steps)
 
     # ── Steps 3-4: optional Clean and Export ─────────────────────────────────
     # `pipeline` used to stop here, so it did not reproduce the GUI chain
@@ -846,40 +912,46 @@ def _run_pipeline_post_steps(args, checkpoints_dir, total_steps):
 
     source_ply = _latest_checkpoint_ply(checkpoints_dir)
     if source_ply is None:
-        print("\n⚠️  Aucun checkpoint .ply trouvé — nettoyage et export ignorés.")
+        print("\n" + tr("cli_no_checkpoint", "⚠️  No checkpoint .ply found - cleaning and export skipped."))
         return
 
     if wants_clean:
-        _sep(f"Étape 3/{total_steps} — Nettoyage")
+        _sep(_step_title(3, total_steps, "cli_step_clean", "Cleaning"))
         cleaned = source_ply.with_name(f"{source_ply.stem}_cleaned.ply")
-        print(f"  Source   : {source_ply.name}")
-        print(f"  Sévérité : {wants_clean}")
+        _print_kv(
+            ("cli_lbl_source", "Source", source_ply.name),
+            ("cli_lbl_severity", "Severity", wants_clean),
+        )
         try:
             stats = clean_ply(str(source_ply), str(cleaned), strength=wants_clean, log=print)
         except (ValueError, FileNotFoundError, MemoryError) as e:
-            print(f"Erreur pendant le nettoyage : {e}")
+            print(_t("cli_clean_failed", "Error during cleaning: {err}", err=e))
             sys.exit(1)
-        print(f"  ✓ {cleaned.name} ({stats.get('kept', '?')} splats conservés)")
+        print(_t("cli_clean_item", "  ✓ {name} ({kept} splats kept)", name=cleaned.name, kept=stats.get('kept', '?')))
         source_ply = cleaned
 
     if wants_export:
         from app.core.export_engine import ExportEngine
 
         step = 4 if wants_clean else 3
-        _sep(f"Étape {step}/{total_steps} — Export")
+        _sep(_step_title(step, total_steps, "cli_step_export", "Export"))
         export_root = _Path(getattr(args, "export_output", None) or source_ply.parent)
         engine = ExportEngine(logger_callback=print)
 
         missing = engine.missing_dependency(wants_export)
         if missing:
-            print(f"Erreur : export {wants_export} indisponible — dépendance manquante : {missing}")
+            print(_t("exp_log_missing_dependency",
+                     "Error: {fmt} export unavailable - missing dependency: {dep}",
+                     fmt=wants_export, dep=missing))
             sys.exit(1)
 
-        print(f"  Source  : {source_ply.name}")
-        print(f"  Format  : {wants_export}")
-        print(f"  Destin. : {export_root}")
+        _print_kv(
+            ("cli_lbl_source", "Source", source_ply.name),
+            ("cli_lbl_format", "Format", wants_export),
+            ("cli_lbl_dest", "Dest.", export_root),
+        )
         if not engine.export(str(source_ply), str(export_root), wants_export):
-            print("Erreur : l'export a échoué.")
+            print(tr("cli_export_failed", "Error: export failed."))
             sys.exit(1)
         print(f"  ✓ {source_ply.stem}.{wants_export}")
 

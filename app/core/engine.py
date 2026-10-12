@@ -6,6 +6,7 @@ import shutil
 import sqlite3
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -137,18 +138,39 @@ _REMAPPED_ID_COLUMNS = (
 )
 
 
+@dataclass
+class ColmapCallbacks:
+    """Optional UI hooks of a :class:`ColmapEngine` run, grouped in one object."""
+
+    logger: Callable | None = None
+    progress: Callable | None = None
+    status: Callable | None = None
+    check_cancel: Callable | None = None
+
+
 class ColmapEngine(BaseEngine):
     """COLMAP execution engine, independent of the graphical interface"""
 
     def __init__(
         self, params: Any, input_path: str, output_path: str, input_type: str, fps: int,
         project_name: str = "Untitled",
+        callbacks: ColmapCallbacks | None = None,
+        *,
         logger_callback: Callable | None = None,
         progress_callback: Callable | None = None,
         status_callback: Callable | None = None,
         check_cancel_callback: Callable | None = None,
     ):
-        """Initialise the COLMAP engine with the configuration parameters."""
+        """Initialise the COLMAP engine with the configuration parameters.
+
+        Callbacks are given through ``callbacks``; the four legacy keyword
+        arguments stay accepted and, when set, override the matching field.
+        """
+        cb = callbacks or ColmapCallbacks()
+        logger_callback = logger_callback or cb.logger
+        progress_callback = progress_callback or cb.progress
+        status_callback = status_callback or cb.status
+        check_cancel_callback = check_cancel_callback or cb.check_cancel
         super().__init__("COLMAP", logger_callback, thermal_throttling=params.thermal_throttling)
         self.params = params
         self.input_path = Path(input_path)

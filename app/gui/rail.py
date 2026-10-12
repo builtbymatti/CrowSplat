@@ -22,7 +22,7 @@ vertical overflow on a small screen, already handled this way elsewhere
 in the app).
 """
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -118,36 +118,55 @@ def _theme():
 # live theme accent, so it never drifts from the existing selection color.
 _ROOT_ACCENT = "#7aa2f7"
 
-# Common item style: left-aligned, compact, minimalist. Selection and hover
-# are conveyed by a light background (no border).
-_ITEM_STYLE = (
-    "QPushButton { text-align: left; padding: 3px 8px; border: none; background: transparent; }"
-    "QPushButton:checked { background: rgba(122,162,247,0.20); border-radius: 4px; }"
-    "QPushButton:hover { background: rgba(255,255,255,0.06); border-radius: 4px; }"
-)
+def _side(rtl):
+    """Leading edge name: ``left`` for left-to-right UIs, ``right`` for RTL."""
+    return "right" if rtl else "left"
 
-# Layered on top of _ITEM_STYLE for the "Projet" root item only: permanent
-# tinted background + left accent bar, larger/bolder text, regardless of
+
+# Common item style: aligned on the leading edge, compact, minimalist.
+# Selection and hover are conveyed by a light background (no border).
+def _item_style(rtl=False):
+    return (
+        f"QPushButton {{ text-align: {_side(rtl)}; padding: 3px 8px; border: none;"
+        " background: transparent; }"
+        "QPushButton:checked { background: rgba(122,162,247,0.20); border-radius: 4px; }"
+        "QPushButton:hover { background: rgba(255,255,255,0.06); border-radius: 4px; }"
+    )
+
+
+# Layered on top of the item style for the "Projet" root item only: permanent
+# tinted background + leading accent bar, larger/bolder text, regardless of
 # checked state. Declarations here are additive on the cascade — properties
-# _ITEM_STYLE already sets for ``:checked`` (like border-radius) and are not
+# the item style already sets for ``:checked`` (like border-radius) and are not
 # redeclared here keep their base value, so the selection highlight still
 # reads clearly against the permanent tint (0.20 vs 0.14 alpha).
-_ROOT_EXTRA_STYLE = (
-    "QPushButton {"
-    " padding-left: 16px; font-weight: 700; font-size: 13px;"
-    f" background: rgba(122,162,247,0.14); border-left: 3px solid {_ROOT_ACCENT}; }}"
-    "QPushButton:checked {"
-    f" background: rgba(122,162,247,0.20); border-left: 3px solid {_ROOT_ACCENT}; }}"
-)
+def _root_extra_style(rtl=False):
+    side = _side(rtl)
+    return (
+        "QPushButton {"
+        f" padding-{side}: 16px; font-weight: 700; font-size: 13px;"
+        f" background: rgba(122,162,247,0.14); border-{side}: 3px solid {_ROOT_ACCENT}; }}"
+        "QPushButton:checked {"
+        f" background: rgba(122,162,247,0.20); border-{side}: 3px solid {_ROOT_ACCENT}; }}"
+    )
 
-# Layered on top of _ITEM_STYLE for OUTILS items: lighter indentation than the
-# PARAMÈTRES tree (no dash/trunk to make room for), between Projet's 16px and
-# the tree items' ~36px.
-_OUTILS_EXTRA_STYLE = "QPushButton { padding-left: 20px; }"
+
+# Layered on top of the item style for OUTILS items: lighter indentation than
+# the PARAMÈTRES tree (no dash/trunk to make room for), between Projet's 16px
+# and the tree items' ~36px.
+def _outils_extra_style(rtl=False):
+    return f"QPushButton {{ padding-{_side(rtl)}: 20px; }}"
+
+
+# Left-to-right defaults, kept as module constants.
+_ITEM_STYLE = _item_style()
+_ROOT_EXTRA_STYLE = _root_extra_style()
+_OUTILS_EXTRA_STYLE = _outils_extra_style()
+
 
 # Vertical trunk connecting PARAMÈTRES items back to Projet.
-def _tree_trunk_style():
-    return f"border: none; border-left: 1px solid {_theme()['border']};"
+def _tree_trunk_style(rtl=False):
+    return f"border: none; border-{_side(rtl)}: 1px solid {_theme()['border']};"
 
 # Short horizontal dash bridging the trunk to each item row.
 def _dash_style():
@@ -197,6 +216,9 @@ class Rail(QWidget):
         self._buttons = {}          # key -> QPushButton
         self._status = {}           # step key -> StepStatus
         self._labels = {}           # group id -> (QLabel, (i18n_key, default))
+        # Direction-aware widgets: (widget, stylesheet(rtl) -> str,
+        # leading-margin or None), re-applied when the layout direction flips.
+        self._directional = []
         self.init_ui()
         add_language_observer(self.retranslate_ui)
 
@@ -224,6 +246,29 @@ class Rail(QWidget):
         scroll.setWidget(container)
         outer.addWidget(scroll)
         self.retranslate_ui()
+        self._apply_direction()
+
+    def _is_rtl(self):
+        return self.layoutDirection() == Qt.LayoutDirection.RightToLeft
+
+    def _track(self, widget, style_fn, lead_margin=None):
+        """Register ``widget`` so its stylesheet follows the layout direction."""
+        self._directional = [e for e in self._directional if e[0] is not widget]
+        self._directional.append((widget, style_fn, lead_margin))
+
+    def _apply_direction(self):
+        """Pick left/right in every stylesheet and margin from the direction."""
+        rtl = self._is_rtl()
+        for widget, style_fn, lead_margin in self._directional:
+            widget.setStyleSheet(style_fn(rtl))
+            if lead_margin is not None:
+                left, right = (0, lead_margin) if rtl else (lead_margin, 0)
+                widget.setContentsMargins(left, 0, right, 4)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.LayoutDirectionChange:
+            self._apply_direction()
+        super().changeEvent(event)
 
     def _build_group(self, spec):
         """Dispatch to the renderer matching this group's "kind"."""
@@ -242,7 +287,7 @@ class Rail(QWidget):
         (key,) = spec["keys"]
         self._status[key] = StepStatus.IDLE
         btn = self._add_item(key, self._layout)
-        btn.setStyleSheet(_ITEM_STYLE + _ROOT_EXTRA_STYLE)
+        self._track(btn, lambda rtl: _item_style(rtl) + _root_extra_style(rtl))
 
     def _build_tree_group(self, spec):
         """Build a group whose items read as visual children of Projet: a
@@ -250,14 +295,13 @@ class Rail(QWidget):
         short horizontal dash (standard file-tree pattern).
         """
         trunk = QFrame()
-        trunk.setStyleSheet(_tree_trunk_style())
+        self._track(trunk, _tree_trunk_style)
         trunk_layout = QVBoxLayout(trunk)
-        trunk_layout.setContentsMargins(12, 4, 0, 4)
+        trunk_layout.setContentsMargins(12, 4, 0, 4)  # mirrored by Qt in RTL
         trunk_layout.setSpacing(2)
 
         label = QLabel(self)
-        label.setStyleSheet(_group_label_style())
-        label.setContentsMargins(6, 0, 0, 4)
+        self._track(label, lambda _rtl: _group_label_style(), lead_margin=6)
         trunk_layout.addWidget(label)
         self._labels[spec["id"]] = (label, spec["label"])
 
@@ -289,19 +333,18 @@ class Rail(QWidget):
         self._layout.addSpacing(6)
 
         label = QLabel(self)
-        label.setStyleSheet(_group_label_style())
-        label.setContentsMargins(20, 0, 0, 4)
+        self._track(label, lambda _rtl: _group_label_style(), lead_margin=20)
         self._layout.addWidget(label)
         self._labels[spec["id"]] = (label, spec["label"])
 
         for key in spec["keys"]:
             btn = self._add_item(key, self._layout)
-            btn.setStyleSheet(_ITEM_STYLE + _OUTILS_EXTRA_STYLE)
+            self._track(btn, lambda rtl: _item_style(rtl) + _outils_extra_style(rtl))
 
     def _add_item(self, key, layout):
         btn = QPushButton()
         btn.setCheckable(True)
-        btn.setStyleSheet(_ITEM_STYLE)
+        self._track(btn, _item_style)
         btn.clicked.connect(lambda _checked=False, k=key: self._on_item_clicked(k))
         self._group.addButton(btn)
         self._buttons[key] = btn

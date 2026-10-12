@@ -1,4 +1,80 @@
-from dataclasses import asdict, dataclass, fields
+import logging
+import types
+import typing
+from dataclasses import asdict, dataclass
+
+logger = logging.getLogger(__name__)
+
+_MISSING = object()
+
+
+def _coerce_scalar(value, target):
+    """Coerce ``value`` to ``target`` (bool/int/float/str); _MISSING if impossible."""
+    if target is bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+            return value.strip().lower() == "true"
+        return _MISSING
+    if target is int:
+        if isinstance(value, bool):
+            return _MISSING
+        if isinstance(value, int):
+            return value
+        try:
+            number = float(value) if isinstance(value, (float, str)) else None
+        except ValueError:
+            return _MISSING
+        if number is not None and number == number and number not in (float("inf"), float("-inf")) \
+                and number.is_integer():
+            return int(number)
+        return _MISSING
+    if target is float:
+        if isinstance(value, bool):
+            return _MISSING
+        if isinstance(value, (int, float, str)):
+            try:
+                number = float(value)
+            except ValueError:
+                return _MISSING
+            return number if number == number and number not in (float("inf"), float("-inf")) else _MISSING
+        return _MISSING
+    if target is str:
+        return value if isinstance(value, str) else _MISSING
+    return value
+
+
+def coerce_known_fields(cls, data: dict) -> dict:
+    """Keep only the keys of dataclass ``cls`` and coerce them to the declared
+    scalar types; values that cannot be coerced are dropped (field default
+    applies) and logged. Protects against hand-edited configs/presets.
+    """
+    hints = typing.get_type_hints(cls)
+    out = {}
+    for name, value in data.items():
+        hint = hints.get(name)
+        if hint is None:
+            continue
+        args = typing.get_args(hint) if isinstance(hint, types.UnionType) or typing.get_origin(hint) is typing.Union else (hint,)
+        allows_none = type(None) in args
+        if value is None:
+            if allows_none:
+                out[name] = None
+            continue
+        scalars = [a for a in args if a in (bool, int, float, str)]
+        if not scalars:
+            out[name] = value
+            continue
+        for target in scalars:
+            coerced = _coerce_scalar(value, target)
+            if coerced is not _MISSING:
+                out[name] = coerced
+                break
+        else:
+            logger.warning("Ignoring invalid value %r for %s.%s", value, cls.__name__, name)
+    return out
 
 FEATURE_TYPES = ['SIFT', 'ALIKED_N16ROT', 'ALIKED_N32']
 MATCHING_TYPES = ['SIFT_BRUTEFORCE', 'ALIKED_BRUTEFORCE', 'SIFT_LIGHTGLUE', 'ALIKED_LIGHTGLUE']
@@ -68,7 +144,7 @@ class ColmapParams:
 
     @classmethod
     def from_dict(cls, data):
-        # Filter unknown keys to avoid errors when the json is old
-        valid_keys = {f.name for f in fields(cls)}
-        filtered_data = {k: v for k, v in data.items() if k in valid_keys}
-        return cls(**filtered_data)
+        # Drop unknown keys (old json) and ill-typed values (hand-edited json)
+        if not isinstance(data, dict):
+            return cls()
+        return cls(**coerce_known_fields(cls, data))

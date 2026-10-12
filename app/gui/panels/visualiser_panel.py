@@ -137,7 +137,7 @@ class VisualiserPanel:
             spin.setRange(-10000.0, 10000.0)
             spin.setDecimals(3)
             self.cam_pos[axis] = spin
-            form.addRow(QLabel(f"Position {axis.upper()}"), spin)
+            form.addRow(QLabel(axis.upper()), spin)
 
         self.cam_rot = {}
         self.lbl_cam_rot = QLabel()
@@ -147,7 +147,7 @@ class VisualiserPanel:
             spin.setRange(-360.0, 360.0)
             spin.setDecimals(1)
             self.cam_rot[axis] = spin
-            form.addRow(QLabel(f"Rotation {axis.upper()}"), spin)
+            form.addRow(QLabel(axis.upper()), spin)
         layout.addLayout(form)
 
         layout.addStretch(1)

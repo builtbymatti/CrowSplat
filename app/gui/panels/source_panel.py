@@ -470,6 +470,7 @@ class SourcePanel:
             self._video_trim = dialog.selected_range
             self._trim_source = str(path) if dialog.selected_range else None
             self._sync_video_range_label()
+
     def _browse_input_dir(self):
         path = get_existing_directory(self.center, tr("btn_browse", "Parcourir"))
         if path:

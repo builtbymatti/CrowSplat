@@ -16,7 +16,9 @@ has no such flags, so they were dropped (audit D14). ``from_dict()`` still
 ignores them in old presets.
 """
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass
+
+from .params import coerce_known_fields
 
 # Flags promoted to structured fields but NOT handled natively by build_command:
 # we fold them into custom_args (the engine allowlist filters them). Fixed order
@@ -118,8 +120,7 @@ class BrushParams:
         """
         if not isinstance(data, dict):
             return cls()
-        valid = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in valid})
+        return cls(**coerce_known_fields(cls, data))
 
     def to_engine_params(self) -> dict:
         """Produce the flat dict consumed by ``BrushEngine.build_command()``.

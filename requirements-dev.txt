@@ -13,6 +13,8 @@ pytest>=9.0,<10
 pytest-qt>=4.4,<5
 # Coverage measurement: pytest --cov=app --cov-report=term-missing
 pytest-cov>=7.0,<8
+# Kills a hung test instead of blocking the whole run: pytest --timeout=60
+pytest-timeout>=2.4,<3
 
 # Security auditing
 pip-audit>=2.8,<3

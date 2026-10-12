@@ -23,6 +23,9 @@ class SplatTransformEngine(BaseEngine):
     a curated set of data-cleaning operations exposed via ALLOWED_FLAGS.
     """
 
+    # Output formats offered by the GUI (single source of truth for the panel)
+    SUPPORTED_FORMATS = ["ply", "spz", "sog", "splat"]
+
     # Flags that take no value
     ALLOWED_FLAGS_BOOLEAN = {
         "--filter-nan",      # Remove NaN/degenerate splats

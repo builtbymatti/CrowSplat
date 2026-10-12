@@ -31,6 +31,7 @@ dev = [
     "pytest>=9.0,<10",
     "pytest-qt>=4.4,<5",
     "pytest-cov>=7.0,<8",
+    "pytest-timeout>=2.4,<3",
     "pip-audit>=2.8,<3",
     "pip-tools>=7.4,<8",
 ]
@@ -57,7 +58,7 @@ DEP001 = ["open3d", "spz", "bpy"]
 # couvrir le même ensemble pour que le résultat ne dépende pas de l'état du venv.
 DEP003 = ["open3d", "spz", "bpy"]
 # Outils de dev déclarés dans l'extra [dev], jamais importés par le code.
-DEP002 = ["ruff", "mypy", "deptry", "pytest", "pytest-qt", "pytest-cov", "pip-audit", "pip-tools"]
+DEP002 = ["ruff", "mypy", "deptry", "pytest", "pytest-qt", "pytest-cov", "pytest-timeout", "pip-audit", "pip-tools"]
 
 [tool.ruff]
 target-version = "py310"

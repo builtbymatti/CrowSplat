@@ -383,7 +383,7 @@ class ReconstructionPanel:
 
     # ── i18n ────────────────────────────────────────────────────────────────────
     def retranslate_ui(self):
-        self.info_label.setText(tr("info_cpu", get_optimal_threads()))
+        self.info_label.setText(tr("info_cpu", "Apple Silicon detected - {} threads optimized", get_optimal_threads()))
         self.lbl_resume.setText(tr("recon_resume", "Reprise de COLMAP (dossier projet ou images)"))
         self.chk_entrainement.setText(tr("chain_train_after", "Lancer Brush"))
         self.chk_visualiser.setText(tr("chain_view_after", "Lancer dans SuperSplat"))

@@ -9,6 +9,7 @@ tracked by git: this module must therefore run on every launch of
 ``run.command`` so it also works after a fresh ``git clone``. Idempotent: when
 the file's current icon already matches the target icon, nothing is written.
 """
+import logging
 from pathlib import Path
 
 # pyobjc may not be available on non-macOS or minimal installs
@@ -16,6 +17,8 @@ try:
     from AppKit import NSWorkspace, NSImage  # noqa: I001
 except ImportError:
     NSWorkspace = NSImage = None  # type: ignore[assignment,misc]
+
+logger = logging.getLogger(__name__)
 
 
 def set_launcher_icon(launcher_path: Path, icon_path: Path) -> bool:
@@ -46,7 +49,8 @@ def set_launcher_icon(launcher_path: Path, icon_path: Path) -> bool:
                 return True
 
         return bool(workspace.setIcon_forFile_options_(new_image, str(launcher_path), 0))
-    except Exception:
+    except Exception:  # defensive: Cocoa bridge errors must never break the launch
+        logger.debug("Could not set launcher icon", exc_info=True)
         return False
 
 

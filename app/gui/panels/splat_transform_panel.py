@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.i18n import add_language_observer, tr
+from app.core.splat_transform_engine import SplatTransformEngine
 from app.gui.run_state_binding import bind_flag_checkbox
 from app.gui.widgets.cancel_button import CancelButton
 from app.gui.widgets.dialog_utils import get_existing_directory, get_open_file_name
@@ -83,7 +84,7 @@ class SplatTransformPanel:
         form = QFormLayout()
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)  # avoid horizontal overflow (long labels)
         self.combo_format = QComboBox()
-        self.combo_format.addItems(["ply", "spz", "sog", "splat"])
+        self.combo_format.addItems(SplatTransformEngine.SUPPORTED_FORMATS)
         self.combo_format.currentTextChanged.connect(self._on_format_changed)
         self.lbl_format = QLabel()
         form.addRow(self.lbl_format, self.combo_format)

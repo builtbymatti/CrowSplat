@@ -12,6 +12,9 @@ Startup-install fixes.
 - **Startup offers to install missing system tools** (COLMAP, ffmpeg, and now cmake) via Homebrew, with the same y/n question; no answer means no.
 - **`CorbeauSplat.command` repairs a broken pip** (metadata folder without `RECORD`) instead of failing every later upgrade, and keeps going if the pip upgrade fails.
 
+### ✨ Added
+- **Broken-environment recovery in `CorbeauSplat.command`.** When a launch step fails (or the app dies within 15 seconds of starting), the launcher offers to delete the Python environments and retry once. Configuration and `engines/` are kept.
+
 ### 🔄 Changed
 - **Factory reset button moved to the Settings window** (still asks for confirmation, Light/Deep choice, before doing anything).
 

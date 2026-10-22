@@ -16,6 +16,29 @@ phase() {
 	echo "── $1 ──"
 }
 
+# --- Broken-environment recovery ---
+# Offered when a launch step fails: removes only the Python environments
+# (config.json and engines/ are kept) and restarts the launcher once.
+offer_env_reset() {
+	trap - ERR
+	echo ""
+	echo "❌ Launch failed. Your environment seems broken."
+	if [ "${CORBEAUSPLAT_AUTO_RESET:-}" = "1" ] || [ ! -t 0 ]; then
+		echo "    Automatic reset already tried (or no terminal available): not retrying."
+		exit 1
+	fi
+	echo "    A reset deletes the Python environments (.venv, .venv_sharp, .venv_360, .venv_4dgs)"
+	echo "    and rebuilds them. Your configuration and engines are kept."
+	read -p "    Reset the environment and retry? (y/n): " -n 1 -r
+	echo
+	if [[ $REPLY =~ ^[YyOo]$ ]]; then
+		rm -rf ".venv" ".venv_sharp" ".venv_360" ".venv_4dgs"
+		say "✅ Environments removed. Restarting..."
+		CORBEAUSPLAT_AUTO_RESET=1 exec "$0" "$@"
+	fi
+	exit 1
+}
+
 # --- Phase 0: Clean Reset (--clean flag) & argument filtering ---
 CLEAN_MODE=false
 FILTERED_ARGS=()
@@ -171,6 +194,7 @@ else
 fi
 
 # --- Phase 2: Environment & Venv Health ---
+trap 'offer_env_reset "${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}"' ERR
 phase "Phase 2 — Preparing Environment"
 VENV_DIR=".venv"
 PYTHON_CMD="$VENV_DIR/bin/python3"
@@ -291,7 +315,7 @@ if [ -n "$MISSING_MODULES" ]; then
 	echo "❌ Modules missing despite sync:$MISSING_MODULES"
 	echo "    The $DEP_FILE file could not be fully applied."
 	echo "    Relaunch, or reinstall manually: $PYTHON_CMD -m pip install -r $DEP_FILE"
-	exit 1
+	offer_env_reset ${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}
 fi
 say "✅ Dependencies synchronized and verified."
 
@@ -309,8 +333,15 @@ phase "Phase 5 — Launching CorbeauSplat"
 say "CorbeauSplat…"
 echo ""
 
-if [ ${#FILTERED_ARGS[@]} -gt 0 ]; then
-	"$PYTHON_CMD" main.py "${FILTERED_ARGS[@]}"
-else
-	"$PYTHON_CMD" main.py
+# The app's own exit code must not trigger the recovery prompt, except when
+# it dies within seconds of starting (typical of a broken environment).
+trap - ERR
+START_TS=$(date +%s)
+set +e
+"$PYTHON_CMD" main.py ${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}
+APP_STATUS=$?
+set -e
+if [ "$APP_STATUS" -ne 0 ] && [ $(( $(date +%s) - START_TS )) -lt 15 ]; then
+	offer_env_reset ${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}
 fi
+exit "$APP_STATUS"

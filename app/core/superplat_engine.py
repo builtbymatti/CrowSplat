@@ -24,8 +24,8 @@ DATA_SERVER_DEFAULT_PORT = 8000
 # before reporting failure, rather than trusting the spawn blindly (audit
 # L3-07: `npx serve` can exit quietly on a busy port, or take a moment to
 # come up, without raising in this process).
-_PORT_PROBE_ATTEMPTS = 20
-_PORT_PROBE_DELAY = 0.2  # seconds — ~4s worst case
+_PORT_PROBE_ATTEMPTS = 75
+_PORT_PROBE_DELAY = 0.2  # seconds — ~15s worst case (cold npx start can be slow)
 
 
 class SuperSplatEngine(BaseEngine):

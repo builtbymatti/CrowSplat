@@ -7,6 +7,7 @@
 Startup-install fixes.
 
 ### 🐛 Fixed
+- **SuperSplat no longer reports a false failure on a slow first start.** The wait for the viewer to open its port went from ~4 s to ~15 s (a cold `npx` start, e.g. right after installing Node.js, could exceed 4 s).
 - **Sharp installs on Python 3.12/3.13.** The installer only looked for Python 3.11/3.10 and gave up on machines with a newer Python; it now tries 3.11, 3.10, 3.12, then 3.13.
 - **Disabled engines are offered at startup** like the others (installed only on a "y", the enabled flag in `config.json` is never touched).
 - **Startup offers to install missing system tools** (COLMAP, ffmpeg, and now cmake) via Homebrew, with the same y/n question; no answer means no.

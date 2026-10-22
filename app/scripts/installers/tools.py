@@ -116,7 +116,7 @@ def install_rust_toolchain():
 def install_system_dependencies(check_only=False, startup=False):
     print("--- System Dependency Check (Homebrew) ---")
     missing = []
-    for cmd in ["colmap", "ffmpeg", "cmake"]:
+    for cmd in ["colmap", "ffmpeg", "cmake", "npx"]:
         if shutil.which(cmd) is None:
             missing.append(cmd)
 
@@ -160,6 +160,9 @@ def install_system_dependencies(check_only=False, startup=False):
             subprocess.check_call(["brew", "install", "ffmpeg"])
         if "cmake" in missing:
             subprocess.check_call(["brew", "install", "cmake"])
+        if "npx" in missing:
+            # npx ships with Node.js; the SuperSplat viewer is served through it.
+            subprocess.check_call(["brew", "install", "node"])
         if "libomp" in missing:
             subprocess.check_call(["brew", "install", "libomp"])
         if "freeimage" in missing:

@@ -163,6 +163,28 @@ else
 	say "✅ Homebrew: $("$BREW_BIN" --version | head -1)"
 fi
 
+# 3. Git (engines are downloaded with it). On a Mac without the Command Line
+# Tools, /usr/bin/git is only a stub that fails, hence the --version test.
+if ! git --version > /dev/null 2>&1; then
+	echo ""
+	echo "⚠️  Required component missing: Git."
+	echo "    It downloads the engines (Sharp, 360, 4DGS) and checks for updates."
+	if [ -n "$BREW_BIN" ]; then
+		read -p "    Install via Homebrew now? (y/n) " -n 1 -r
+		echo
+		if [[ $REPLY =~ ^[YyOo]$ ]]; then
+			"$BREW_BIN" install git
+		fi
+	else
+		echo "    Install the Xcode Command Line Tools or Homebrew, then relaunch."
+	fi
+	if ! git --version > /dev/null 2>&1; then
+		echo "❌ Git still unavailable. Install it (xcode-select --install, or brew install git) then relaunch CorbeauSplat."
+		exit 1
+	fi
+fi
+say "✅ Git: $(git --version)"
+
 # --- Phase 1: Update Check ---
 if [ -d ".git" ]; then
 	phase "Phase 1 — Checking for Updates"

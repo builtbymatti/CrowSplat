@@ -13,6 +13,7 @@ Startup-install fixes.
 - **`CorbeauSplat.command` repairs a broken pip** (metadata folder without `RECORD`) instead of failing every later upgrade, and keeps going if the pip upgrade fails.
 
 ### ✨ Added
+- **Git check in `CorbeauSplat.command`.** The launcher verifies Git works (the macOS stub fails without the Command Line Tools) and offers to install it via Homebrew, instead of failing later during engine downloads.
 - **Broken-environment recovery in `CorbeauSplat.command`.** When a launch step fails (or the app dies within 15 seconds of starting), the launcher offers to delete the Python environments and retry once. Configuration and `engines/` are kept.
 
 ### 🔄 Changed

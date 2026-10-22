@@ -400,9 +400,6 @@ class SourcePanel:
         self.btn_settings_delete = QPushButton()
         cfg_row.addWidget(self.btn_settings_delete)
         sg.addLayout(cfg_row)
-        self.btn_settings_reset = QPushButton()
-        self.btn_settings_reset.setStyleSheet("color: #f7768e;")
-        sg.addWidget(self.btn_settings_reset)
         layout.addWidget(self.settings_group)
 
         layout.addStretch(1)
@@ -648,7 +645,6 @@ class SourcePanel:
         self.btn_settings_load.setText(tr("settings_load", "Charger…"))
         self.btn_settings_save.setText(tr("settings_save", "Sauvegarder…"))
         self.btn_settings_delete.setText(tr("settings_delete", "Supprimer…"))
-        self.btn_settings_reset.setText(tr("settings_reset", "Réinitialiser"))
         self.lbl_advanced.setText(tr("toggle_advanced", "Avancé"))
         self.chk_undistort.setText(tr("source_undistort", "Générer images non-distordues"))
         self.chk_filter_blur.setText(tr("source_filter_blur", "Supprimer les images floues"))

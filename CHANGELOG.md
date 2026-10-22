@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-10-22
+
+Startup-install fixes.
+
+### 🐛 Fixed
+- **Sharp installs on Python 3.12/3.13.** The installer only looked for Python 3.11/3.10 and gave up on machines with a newer Python; it now tries 3.11, 3.10, 3.12, then 3.13.
+- **Disabled engines are offered at startup** like the others (installed only on a "y", the enabled flag in `config.json` is never touched).
+- **Startup offers to install missing system tools** (COLMAP, ffmpeg, and now cmake) via Homebrew, with the same y/n question; no answer means no.
+- **`CorbeauSplat.command` repairs a broken pip** (metadata folder without `RECORD`) instead of failing every later upgrade, and keeps going if the pip upgrade fails.
+
+### 🔄 Changed
+- **Factory reset button moved to the Settings window** (still asks for confirmation, Light/Deep choice, before doing anything).
+
 ## [2.1.0] - 2026-10-12
 
 Code-quality release: closes the v2026.1 audit (45 major and 137 minor

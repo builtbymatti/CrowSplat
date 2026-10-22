@@ -214,11 +214,9 @@ class DependencyManager:
         label = name.capitalize()
         if check_only:
             pass  # Just report status below
-        elif startup and not enabled:
-            # L6-02: a disabled engine is audited but never installed.
-            print(f"  ⏭️  {label}: disabled, not installed.")
-            return False
         elif startup and not self._confirm_install(name):
+            # A disabled engine is offered too (it only gets installed on a
+            # "y"); installing never touches its enabled flag in config.json.
             print(f"  ⏭️  {label}: installation skipped.")
             return False
         elif startup:
@@ -272,7 +270,7 @@ class DependencyManager:
         from app.scripts.installers.tools import install_system_dependencies
 
         print("--- System Dependency Check ---")
-        install_system_dependencies(check_only=check_only or startup)
+        install_system_dependencies(check_only=check_only, startup=startup)
 
         config = self.get_config()
         missing_engines_startup = False

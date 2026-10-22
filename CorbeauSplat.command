@@ -242,7 +242,24 @@ phase "Phase 3 — Synchronizing Dependencies"
 # setuptools/wheel are required at build time by packages without a
 # precompiled wheel for the running Python version (e.g. pyobjc on a
 # very recent Python release); venv does not always bundle them.
-"$PYTHON_CMD" -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1
+# Self-repair: a pip-*.dist-info folder without a RECORD file (left half-empty
+# by an interrupted upgrade or a file-sync tool) makes every later pip upgrade
+# fail with "Cannot uninstall pip". Only those broken pip folders are removed.
+SITE_PKGS=$("$PYTHON_CMD" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])" 2>/dev/null || true)
+if [ -n "$SITE_PKGS" ] && [ -d "$SITE_PKGS" ]; then
+	for d in "$SITE_PKGS"/pip-*.dist-info; do
+		if [ -d "$d" ] && [ ! -f "$d/RECORD" ]; then
+			say "Repairing pip: removing broken metadata $(basename "$d")"
+			rm -rf "$d"
+		fi
+	done
+	if ! "$PYTHON_CMD" -m pip --version > /dev/null 2>&1; then
+		"$PYTHON_CMD" -m ensurepip --upgrade > /dev/null 2>&1 || true
+	fi
+fi
+if ! "$PYTHON_CMD" -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1; then
+	echo "⚠️  pip/setuptools upgrade failed; continuing with the installed versions."
+fi
 
 if [ -f "requirements.lock" ]; then
 	say "Lockfile found: requirements.lock"

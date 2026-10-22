@@ -113,10 +113,10 @@ def install_rust_toolchain():
     return False
 
 
-def install_system_dependencies(check_only=False):
+def install_system_dependencies(check_only=False, startup=False):
     print("--- System Dependency Check (Homebrew) ---")
     missing = []
-    for cmd in ["colmap", "ffmpeg"]:
+    for cmd in ["colmap", "ffmpeg", "cmake"]:
         if shutil.which(cmd) is None:
             missing.append(cmd)
 
@@ -143,12 +143,23 @@ def install_system_dependencies(check_only=False):
         print("ERROR: Homebrew required.")
         return False
 
+    if startup:
+        # Same y/n question as for missing engines; no answer means no.
+        try:
+            answer = input(f"\n>>> Install {', '.join(missing)} via Homebrew now? (y/n): ").strip().lower()
+        except EOFError:
+            return False
+        if answer not in ("o", "y", "oui", "yes"):
+            return False
+
     print("Installing via Homebrew...")
     try:
         if "colmap" in missing:
             subprocess.check_call(["brew", "install", "colmap"])
         if "ffmpeg" in missing:
             subprocess.check_call(["brew", "install", "ffmpeg"])
+        if "cmake" in missing:
+            subprocess.check_call(["brew", "install", "cmake"])
         if "libomp" in missing:
             subprocess.check_call(["brew", "install", "libomp"])
         if "freeimage" in missing:

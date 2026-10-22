@@ -8,11 +8,9 @@ Anything specific to a single panel (e.g. Brush build mode, COLMAP thermal
 throttling) belongs in that panel's own right-side sidebar instead — this
 window is for cross-cutting, app-wide settings only.
 
-Load/Save/Delete of the full configuration and the factory reset now live in
-``SourcePanel``'s right sidebar (Settings block, below Automation) — they are
-project-workflow actions the user reaches for right where they work, not
-app-wide preferences. ``ResetDialog`` (Light/Deep choice) still lives in this
-module and is reused from ``StudioWindow`` for that button.
+Load/Save/Delete of the full configuration live in ``SourcePanel`` (Settings
+block). The factory reset lives here: ``resetRequested`` is only emitted after
+explicit confirmation in ``ResetDialog`` (Light/Deep choice).
 
 Theme and Language are functional (styling / i18n, not business logic).
 Notifications are exposed as signals/state, wired to the engines elsewhere.
@@ -120,6 +118,7 @@ class SettingsWindow(QDialog):
     """General settings. Emits signals for actions wired elsewhere."""
 
     notificationsToggled = Signal(bool)
+    resetRequested = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -167,6 +166,12 @@ class SettingsWindow(QDialog):
         form.addRow(self.chk_notifications)
 
         layout.addLayout(form)
+
+        # Factory reset: destructive, confirmed in ResetDialog before emitting.
+        self.btn_reset = QPushButton(tr("settings_reset", "Réinitialiser"))
+        self.btn_reset.setStyleSheet("color: #f7768e;")
+        self.btn_reset.clicked.connect(self._on_reset_clicked)
+        layout.addWidget(self.btn_reset)
         layout.addStretch(1)
 
         # Footer: app identity (name + version) and a changelog link, pinned
@@ -215,6 +220,12 @@ class SettingsWindow(QDialog):
         notifications.save_enabled(checked)
         self.notificationsToggled.emit(bool(checked))
 
+    def _on_reset_clicked(self):
+        """Never emitted without explicit confirmation (Light/Deep choice)."""
+        diag = ResetDialog(self)
+        if diag.exec():
+            self.resetRequested.emit(diag.result_deep)
+
     def _open_changelog(self):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(resolve_project_root() / "CHANGELOG.md")))
 
@@ -223,4 +234,5 @@ class SettingsWindow(QDialog):
         self.lbl_theme.setText(tr("theme_change", "Thème"))
         self.lbl_lang.setText(tr("lang_change", "Langue"))
         self.chk_notifications.setText(tr("settings_notifications", "Notifications de fin d'exécution"))
+        self.btn_reset.setText(tr("settings_reset", "Réinitialiser"))
         self.btn_changelog.setText(tr("settings_changelog_link", "Voir le changelog"))

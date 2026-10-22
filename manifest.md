@@ -1,4 +1,5 @@
 # CorbeauSplat — Project Manifest
+<!-- amorcage-managed v2.7 -->
 
 > Version 2.1.0 — macOS Apple Silicon Gaussian Splatting Pipeline
 

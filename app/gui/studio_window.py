@@ -69,7 +69,7 @@ from app.gui.pipeline_orchestrator import (
 )
 from app.gui.pipeline_planner import plan_pipeline
 from app.gui.rail import TOOL_KEYS, Rail, item_label
-from app.gui.settings_window import ResetDialog, SettingsWindow
+from app.gui.settings_window import SettingsWindow
 from app.gui.studio_nav import PageRegistry
 from app.gui.styles import DEFAULT_THEME, THEMES, get_saved_theme, set_dark_theme
 
@@ -284,11 +284,10 @@ class StudioWindow(QMainWindow):
         # Single Launch/Cancel button (ex-topbar), now carried by SourcePanel.
         self.panels["source"].btn_run.clicked.connect(self.on_launch_clicked)
         # Settings block (moved from the General Settings window: config
-        # load/save/delete and factory reset are project-workflow actions).
+        # load/save/delete are project-workflow actions).
         self.panels["source"].btn_settings_load.clicked.connect(self.load_config_dialog)
         self.panels["source"].btn_settings_save.clicked.connect(self.save_config_dialog)
         self.panels["source"].btn_settings_delete.clicked.connect(self.delete_config_dialog)
-        self.panels["source"].btn_settings_reset.clicked.connect(self._on_reset_clicked)
         # D4/L5-09: ReconstructionPanel (and the post-step checkboxes that
         # have no effect in some modes) react to the pipeline mode selector.
         self.panels["source"].combo_mode.currentIndexChanged.connect(self._on_source_mode_changed)
@@ -1178,15 +1177,9 @@ class StudioWindow(QMainWindow):
         if self._settings_window is None:
             self._settings_window = SettingsWindow(self)
             self._settings_window.notificationsToggled.connect(self.set_notifications_enabled)
+            self._settings_window.resetRequested.connect(self.reset_factory)
         self._settings_window.show()
         self._settings_window.raise_()
-
-    def _on_reset_clicked(self):
-        """Destructive reset: never executed without explicit confirmation
-        (Light/Deep choice) in ``ResetDialog``."""
-        diag = ResetDialog(self)
-        if diag.exec():
-            self.reset_factory(diag.result_deep)
 
     def restart_application(self):
         """Restart the application (cf. ``AppLifecycle.restart``)."""

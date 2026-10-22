@@ -30,13 +30,13 @@ class SharpEngineDep(PipEngine):
 
     def install(self):
         self.update_git()
-        # Sharp needs 3.11/3.10 ideally
-        py311 = shutil.which("python3.11") or shutil.which("python3.10")
-        if not py311:
-            print("Python 3.11/3.10 missing for Sharp.")
+        # Prefer 3.11/3.10; fall back to 3.12/3.13 (torch 2.8 ships wheels for them)
+        py = next((p for p in (shutil.which(f"python3.{v}") for v in (11, 10, 12, 13)) if p), None)
+        if not py:
+            print("Python 3.10-3.13 missing for Sharp.")
             return
 
-        self.create_venv(py311)
+        self.create_venv(py)
         req_file = self.target_dir / "requirements.txt"
         if req_file.exists():
             loose = self.target_dir / "requirements_loose.txt"

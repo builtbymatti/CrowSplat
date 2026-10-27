@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 from .base_engine import BaseEngine
 from .i18n import tr
-from .system import resolve_project_root
+from .system import resolve_data_root
 
 # Default port of the viewer itself, distinct from the data server's.
 SUPERSPLAT_DEFAULT_PORT = 3000
@@ -51,7 +51,7 @@ class SuperSplatEngine(BaseEngine):
 
     def get_supersplat_path(self) -> Path:
         """Return the absolute path to the bundled SuperSplat distribution."""
-        return resolve_project_root() / "engines" / "supersplat"
+        return resolve_data_root() / "engines" / "supersplat"
 
     @staticmethod
     def _port_is_open(host: str, port: int, timeout: float = 0.2) -> bool:

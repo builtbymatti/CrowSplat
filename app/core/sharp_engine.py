@@ -10,7 +10,7 @@ from pathlib import Path
 from .base_engine import BaseEngine
 from .i18n import tr
 from .media import conversion_suffix, convert_image, needs_image_conversion, without_hwaccel
-from .system import compute_env, resolve_binary, resolve_project_root, use_videotoolbox
+from .system import compute_env, resolve_binary, resolve_data_root, use_videotoolbox
 
 
 @functools.cache
@@ -68,7 +68,7 @@ class SharpEngine(BaseEngine):
         installed" instead.
         """
         # 1. Dedicated .venv_sharp environment
-        root_dir = resolve_project_root()
+        root_dir = resolve_data_root()
         sharp_venv_bin = root_dir / ".venv_sharp" / "bin"
 
         sharp_bin = sharp_venv_bin / "sharp"
@@ -95,7 +95,7 @@ class SharpEngine(BaseEngine):
 
     def _mps_usable(self) -> bool:
         """False only when the Sharp venv's PyTorch positively lacks MPS."""
-        python = resolve_project_root() / ".venv_sharp" / "bin" / "python3"
+        python = resolve_data_root() / ".venv_sharp" / "bin" / "python3"
         if not (python.exists() and os.access(python, os.X_OK)):
             return True  # nothing to probe; let Sharp report its own error
         return _venv_supports_mps(str(python)) is not False

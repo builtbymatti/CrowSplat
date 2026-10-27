@@ -2,7 +2,7 @@ import json
 import logging
 
 from app.core.atomic_io import read_json_dict, update_json_file
-from app.core.system import resolve_project_root
+from app.core.system import resolve_data_root, resolve_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class LanguageManager:
             self._translations = {}
 
     def load_config(self):
-        config_file = resolve_project_root() / "config.json"
+        config_file = resolve_data_root() / "config.json"
         try:
             if config_file.exists():
                 saved = read_json_dict(config_file).get("language")
@@ -95,7 +95,7 @@ class LanguageManager:
 
     def save_config(self):
         try:
-            config_file = resolve_project_root() / "config.json"
+            config_file = resolve_data_root() / "config.json"
             update_json_file(config_file, language=self.current_lang)
             logger.info("Langue enregistrée : %s (dans %s)", self.current_lang, config_file)
         except OSError as e:

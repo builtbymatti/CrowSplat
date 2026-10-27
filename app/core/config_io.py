@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .params import ColmapParams
 from .run_state import RunState
-from .system import resolve_project_root
+from .system import resolve_data_root
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ CONFIG_VERSION = 1
 
 def configs_dir():
     """Folder of the named configurations (created on demand)."""
-    d = resolve_project_root() / "configs"
+    d = resolve_data_root() / "configs"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

@@ -16,19 +16,19 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-from app.core.system import resolve_project_root
+from app.core.system import resolve_data_root
 from app.scripts.checksum_verifier import load_expected_checksums, verify_download_strict
 
 GITHUB_REPO = "https://api.github.com/repos/upscayl/upscayl-ncnn"
 
 
 def get_bin_dir() -> Path:
-    return resolve_project_root() / "bin"
+    return resolve_data_root() / "bin"
 
 
 def get_models_dir() -> Path:
     """Returns our local models directory (for downloads)."""
-    p = resolve_project_root() / "models" / "upscayl"
+    p = resolve_data_root() / "models" / "upscayl"
     p.mkdir(parents=True, exist_ok=True)
     return p
 

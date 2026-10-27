@@ -5,14 +5,14 @@ from pathlib import Path
 
 from .base_engine import BaseEngine
 from .i18n import tr
-from .system import compute_env, resolve_project_root
+from .system import compute_env, resolve_data_root
 
 logger = logging.getLogger(__name__)
 
 
 def get_venv_360_python():
     """Path to the Python executable of the dedicated ``.venv_360`` environment."""
-    root = resolve_project_root()
+    root = resolve_data_root()
     if sys.platform == "win32":
         return root / ".venv_360" / "Scripts" / "python.exe"
     return root / ".venv_360" / "bin" / "python"
@@ -38,7 +38,7 @@ class Extractor360Engine(BaseEngine):
 
     def __init__(self, logger_callback=None):
         super().__init__("360Extractor", logger_callback)
-        self.root_dir = Path(resolve_project_root())
+        self.root_dir = Path(resolve_data_root())
         self.engines_dir = self.root_dir / "engines"
         self.extractor_dir = self.engines_dir / "extractor_360"
         self.venv_python = Path(get_venv_360_python())

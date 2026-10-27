@@ -10,13 +10,13 @@ from .system import (
     compute_env,
     get_optimal_threads,
     resolve_binary,
-    resolve_project_root,
+    resolve_data_root,
     use_videotoolbox,
 )
 from .trim import trim_window
 
 # Path to the dedicated nerfstudio venv
-_VENV_4DGS = resolve_project_root() / ".venv_4dgs"
+_VENV_4DGS = resolve_data_root() / ".venv_4dgs"
 
 
 def get_venv_4dgs_python():

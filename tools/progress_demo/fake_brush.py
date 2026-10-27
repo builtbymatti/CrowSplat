@@ -12,10 +12,31 @@ Template copied from the release binary:
 """
 
 import argparse
+import math
 import os
 import random
+import struct
 import sys
 import time
+from pathlib import Path
+
+PLY_FIELDS = ("x", "y", "z", "nx", "ny", "nz", "f_dc_0", "f_dc_1", "f_dc_2", "opacity",
+              "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3")
+
+
+def write_splat(path: Path, count: int, rng: random.Random) -> None:
+    """A real binary Gaussian-splat PLY (Brush/3DGS layout), random points."""
+    header = ["ply", "format binary_little_endian 1.0", f"element vertex {count}"]
+    header += [f"property float {f}" for f in PLY_FIELDS] + ["end_header"]
+    rows = bytearray()
+    for _ in range(count):
+        r = rng.random() ** 0.5 * 2.0
+        a, b = rng.uniform(0, 2 * math.pi), rng.uniform(-1, 1)
+        x, y, z = r * math.cos(a) * (1 - b * b) ** 0.5, r * math.sin(a) * (1 - b * b) ** 0.5, r * b
+        scale = math.log(rng.uniform(0.005, 0.05)) if rng.random() > 0.01 else 1.5  # a few giants
+        rows += struct.pack("<17f", x, y, z, 0, 0, 0, rng.uniform(-1, 1), rng.uniform(-1, 1),
+                            rng.uniform(-1, 1), rng.uniform(-4, 4), scale, scale, scale, 1, 0, 0, 0)
+    path.write_bytes(("\n".join(header) + "\n").encode() + bytes(rows))
 
 CYAN, BLUE, RESET, CLEAR = "\x1b[36m", "\x1b[34m", "\x1b[0m", "\x1b[2K"
 
@@ -70,9 +91,11 @@ def main() -> int:
         if pos % args.export_every < max(1, round(rate * 0.05)):
             if is_tty:
                 sys.stderr.write("\r" + CLEAR)
+            write_splat(Path(args.export_path) / f"export_{pos}.ply", 4000, rng)
             print(f"Exported checkpoint export_{pos}.ply", flush=True)
     if is_tty:
         sys.stderr.write("\n")
+    write_splat(Path(args.export_path) / f"export_{args.total}.ply", 4000, rng)
     print("Training finished", flush=True)
     return 0
 

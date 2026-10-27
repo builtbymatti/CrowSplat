@@ -19,6 +19,23 @@ def resolve_project_root() -> Path:
     """
     return Path(__file__).resolve().parent.parent.parent
 
+
+@functools.cache
+def resolve_data_root() -> Path:
+    """Where engines, venvs, models and config.json live.
+
+    Historically the same folder as the code. CrowSplat ships the code inside
+    a signed, read-only .app bundle, so it points ``CROWSPLAT_DATA_DIR`` at
+    ``~/Library/Application Support/CrowSplat``; without it nothing changes.
+    Read-only assets (locales, icons) stay under ``resolve_project_root()``.
+    """
+    override = os.environ.get("CROWSPLAT_DATA_DIR")
+    if override:
+        root = Path(override).expanduser()
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+    return resolve_project_root()
+
 @functools.cache
 def is_apple_silicon():
     """Detect whether we run on Apple Silicon (result cached)"""
@@ -93,7 +110,7 @@ def resolve_binary(name):
     Returns the absolute path, or the name when found in the PATH, otherwise None.
     """
     # 1. Look inside the engines folder at the project root
-    engines_dir = resolve_project_root() / "engines"
+    engines_dir = resolve_data_root() / "engines"
 
     local_path = engines_dir / name
 
@@ -337,7 +354,7 @@ def get_brush_build_mode() -> str:
     build then received `--total-steps`, which it rejects, so the training
     failed immediately with an unhelpful message.
     """
-    version_file = resolve_project_root() / "engines" / "brush.version"
+    version_file = resolve_data_root() / "engines" / "brush.version"
     try:
         if version_file.exists():
             version = version_file.read_text(encoding="utf-8").strip()

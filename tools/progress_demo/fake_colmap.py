@@ -14,6 +14,7 @@ import random
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 N = 40
 rng = random.Random(3)
@@ -28,8 +29,30 @@ def pause(base: float) -> None:
     time.sleep(base * rng.uniform(0.4, 1.8))
 
 
+def arg(name: str) -> str | None:
+    """Value after --name in argv (COLMAP's --Option value style)."""
+    argv = sys.argv
+    return argv[argv.index(name) + 1] if name in argv and argv.index(name) + 1 < len(argv) else None
+
+
+def write_sparse_model(out: str | None) -> None:
+    """Leave a minimal text model so the engine's model check passes."""
+    if not out:
+        return
+    model = Path(out) / "0"
+    model.mkdir(parents=True, exist_ok=True)
+    (model / "cameras.txt").write_text("1 SIMPLE_RADIAL 1920 1080 1500 960 540 0\n")
+    (model / "images.txt").write_text("".join(
+        f"{i} 1 0 0 0 0 0 {i} 1 frame_{i:04d}.jpg\n\n" for i in range(1, N + 1)))
+    (model / "points3D.txt").write_text("1 0 0 1 128 128 128 0.5\n")
+
+
 def main() -> int:
     sub = sys.argv[1] if len(sys.argv) > 1 else ""
+    db = arg("--database_path")
+    if db and not Path(db).exists():
+        import sqlite3
+        sqlite3.connect(db).close()
     if sub == "feature_extractor":
         for i in range(1, N + 1):
             pause(0.12)
@@ -49,6 +72,10 @@ def main() -> int:
             for c in range(1, blocks + 1):
                 pause(0.5 if c > r else 0.25 if c == r else 0.02)
                 glog("pairing.cc:214", f"Processing block [{r}/{blocks}, {c}/{blocks}]")
+    elif sub in ("global_mapper", "view_graph_calibrator"):
+        # Pretend the global mapper finds nothing usable, so the engine falls
+        # back to the incremental mapper below (its real fallback path).
+        pause(0.3)
     elif sub == "mapper":
         glog("incremental_pipeline.cc:323", "Initializing with image pair #1 and #9")
         for i in range(3, N + 1):
@@ -57,13 +84,17 @@ def main() -> int:
             if i % 10 == 0:
                 glog("bundle_adjustment.cc:866", "Bundle adjustment report")
                 pause(0.3)
+        write_sparse_model(arg("--output_path"))
     elif sub == "image_undistorter":
         for i in range(1, N + 1):
             pause(0.04)
             glog("undistortion.cc:191", f"Undistorting image [{i}/{N}]")
+    elif sub in ("-h", "--help", "help"):
+        print("COLMAP 4.2.1 (demo stand-in)")
+        return 0
     else:
-        print(f"fake_colmap: unknown command {sub!r}", file=sys.stderr)
-        return 1
+        # Any other subcommand (model_converter, database tools…) just succeeds.
+        pause(0.1)
     glog("timer.cc:90", f"Elapsed time: {rng.uniform(0.1, 0.9):.3f} [minutes]")
     return 0
 

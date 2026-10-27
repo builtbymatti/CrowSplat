@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .atomic_io import write_json_atomic
 from .config_io import is_safe_config_name
-from .system import resolve_project_root
+from .system import resolve_data_root
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ BRUSH_PRESETS = {
 
 def _store_path() -> Path:
     """Return the location of the user presets file."""
-    return resolve_project_root() / "brush_presets.json"
+    return resolve_data_root() / "brush_presets.json"
 
 
 def load_user_presets() -> dict:

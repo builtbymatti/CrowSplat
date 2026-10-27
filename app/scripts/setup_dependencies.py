@@ -7,7 +7,7 @@ for backward compatibility. External code that imports from
 import sys
 from pathlib import Path
 
-from app.core.system import resolve_project_root
+from app.core.system import resolve_data_root
 
 # ── Re-export all classes and functions for backward compatibility ──────────
 from app.scripts.installers.base import (
@@ -76,7 +76,7 @@ def install_extractor_360():
 
 def get_venv_360_python():
     """Returns path to python executable in .venv_360"""
-    root = resolve_project_root()
+    root = resolve_data_root()
     if sys.platform == "win32":
         return root / ".venv_360" / "Scripts" / "python.exe"
     return root / ".venv_360" / "bin" / "python"

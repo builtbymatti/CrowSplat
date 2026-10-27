@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from app.core.atomic_io import read_json_dict
-from app.core.system import resolve_project_root
+from app.core.system import resolve_data_root
 from app.scripts.checksum_verifier import load_expected_checksums, verify_download_strict
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -15,7 +15,7 @@ from app.scripts.checksum_verifier import load_expected_checksums, verify_downlo
 
 def load_config():
     """Loads config.json from the project root (not the CWD)."""
-    return read_json_dict(resolve_project_root() / "config.json")
+    return read_json_dict(resolve_data_root() / "config.json")
 
 
 def relax_requirements(src, dst):

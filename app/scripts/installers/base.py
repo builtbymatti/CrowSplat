@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from app.core.atomic_io import read_json_dict
-from app.core.system import resolve_project_root
+from app.core.system import resolve_data_root
 
 
 class EngineDependency:
@@ -28,14 +28,14 @@ class EngineDependency:
         # running whatever upstream pushed since. Subclasses that build code
         # should always set it.
         self.pinned_ref = pinned_ref
-        self.root = self.resolve_project_root()
+        self.root = self.resolve_data_root()
         self.engines_dir = self.root / "engines"
         self.version_file = self.engines_dir / f"{name}.version"
         self.target_dir = self.engines_dir / name
         self.bin_path = self.engines_dir / (bin_name if bin_name else name)
 
-    def resolve_project_root(self) -> Path:
-        return resolve_project_root()
+    def resolve_data_root(self) -> Path:
+        return resolve_data_root()
 
     def is_enabled_in_config(self, config: dict) -> bool:
         """SOLID-OCP: lets the engine decide whether it is active"""

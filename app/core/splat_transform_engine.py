@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_engine import BaseEngine
-from .system import resolve_project_root
+from .system import resolve_data_root
 
 
 class SplatTransformEngine(BaseEngine):
@@ -48,7 +48,7 @@ class SplatTransformEngine(BaseEngine):
         self._bin = self._resolve_bin()
 
     def _resolve_bin(self) -> str | None:
-        root = resolve_project_root()
+        root = resolve_data_root()
         local_bin = (
             root / "engines" / "splat-transform"
             / "node_modules" / ".bin" / "splat-transform"

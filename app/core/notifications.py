@@ -13,7 +13,7 @@ skipped.
 import logging
 
 from .atomic_io import read_json_dict, update_json_file
-from .system import resolve_project_root
+from .system import resolve_data_root
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +24,14 @@ CONFIG_KEY = "notifications_enabled"
 
 def get_saved_enabled(default: bool = False) -> bool:
     """Read the notifications toggle from config.json (same idiom as the theme)."""
-    data = read_json_dict(resolve_project_root() / "config.json")
+    data = read_json_dict(resolve_data_root() / "config.json")
     return bool(data.get(CONFIG_KEY, default))
 
 
 def save_enabled(enabled: bool) -> None:
     """Persist the notifications toggle to config.json, preserving other keys."""
     try:
-        update_json_file(resolve_project_root() / "config.json", **{CONFIG_KEY: bool(enabled)})
+        update_json_file(resolve_data_root() / "config.json", **{CONFIG_KEY: bool(enabled)})
     except OSError:
         logger.warning("Notifications: impossible d'écrire le réglage dans config.json")
 

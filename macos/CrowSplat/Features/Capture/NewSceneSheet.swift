@@ -28,7 +28,8 @@ struct NewSceneSheet: View {
             form
                 .frame(width: 420)
         }
-        .frame(height: 560)
+        .frame(minHeight: 560)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Palette.surface)
         .task {
             var s = CaptureSource.classify(urls)
@@ -249,29 +250,44 @@ struct RangeSlider: View {
                 Capsule().fill(Palette.ink4).frame(height: 3).padding(.horizontal, knob / 2)
                 Capsule().fill(Palette.ink).frame(width: max(0, x1 - x0), height: 3)
                     .offset(x: x0 + knob / 2)
-                handle.offset(x: x0).gesture(drag(w: w, span: span, lower: true))
-                handle.offset(x: x1).gesture(drag(w: w, span: span, lower: false))
+                handle(lower: true, span: span).offset(x: x0).gesture(drag(w: w, span: span, lower: true))
+                handle(lower: false, span: span).offset(x: x1).gesture(drag(w: w, span: span, lower: false))
             }
             .frame(height: knob)
+            .coordinateSpace(name: "track")
         }
         .frame(height: 14)
     }
 
-    private var handle: some View {
+    private func handle(lower: Bool, span: Double) -> some View {
         Circle().fill(Palette.ink).frame(width: knob, height: knob)
             .overlay(Circle().strokeBorder(Palette.canvas, lineWidth: 2))
             .contentShape(Circle().inset(by: -6))
+            .accessibilityElement()
+            .accessibilityLabel(lower ? "Start" : "End")
+            .accessibilityValue(Format.clock(lower ? range.lowerBound : range.upperBound))
+            .accessibilityAdjustableAction { direction in
+                let step = span / 100 * (direction == .increment ? 1 : -1)
+                set(lower: lower, to: (lower ? range.lowerBound : range.upperBound) + step, span: span)
+            }
+    }
+
+    /// Clamped so the handles never cross and keep a 2 % gap.
+    private func set(lower: Bool, to value: Double, span: Double) {
+        let v = min(bounds.upperBound, max(bounds.lowerBound, value))
+        let minGap = span * 0.02
+        if lower {
+            range = min(v, range.upperBound - minGap)...range.upperBound
+        } else {
+            range = range.lowerBound...max(v, range.lowerBound + minGap)
+        }
     }
 
     private func drag(w: CGFloat, span: Double, lower: Bool) -> some Gesture {
-        DragGesture(minimumDistance: 0).onChanged { g in
+        // Measured on the whole track, not on the 14 pt handle being dragged.
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("track")).onChanged { g in
             let v = bounds.lowerBound + Double(max(0, min(w, g.location.x - knob / 2)) / w) * span
-            let minGap = span * 0.02
-            if lower {
-                range = min(v, range.upperBound - minGap)...range.upperBound
-            } else {
-                range = range.lowerBound...max(v, range.lowerBound + minGap)
-            }
+            set(lower: lower, to: v, span: span)
         }
     }
 }

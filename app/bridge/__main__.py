@@ -54,6 +54,9 @@ def main(argv=None) -> int:
         return 2
 
     ctx = JobContext(channel)
+    channel.on_broken = ctx.cancel
+    # The app closing its pipe must not kill us mid-write; on_broken cancels.
+    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, lambda *_: ctx.cancel())
     signal.signal(signal.SIGINT, lambda *_: ctx.cancel())
     try:

@@ -8,7 +8,7 @@ in stderr, which the app shows as the raw log.
 
 Event shapes (all carry ``"type"``):
 
-    step      {"id", "label", "index", "count"}   a new stage of the job begins
+    step      {"id", "label", "index", "count", "steps"}  a new stage begins
     progress  {"step", "value"}                    0-100 within the current step
     eta       {"step", "seconds"}                  seconds left, -1 = unknown
     status    {"text"}                             short human line ("image 12/40")
@@ -29,19 +29,30 @@ class Channel:
         self._stream = stream
         self._lock = threading.Lock()
         self.step: str | None = None
+        # Called once if the app goes away mid-job (its end of the pipe closes),
+        # so the job stops instead of training on for nobody.
+        self.on_broken = None
+        self.broken = False
 
     def emit(self, type_: str, **fields) -> None:
         fields["type"] = type_
         fields.setdefault("t", round(time.time(), 3))
         line = json.dumps(fields, ensure_ascii=False, default=str)
         with self._lock:
-            self._stream.write(line + "\n")
-            self._stream.flush()
+            if self.broken:
+                return
+            try:
+                self._stream.write(line + "\n")
+                self._stream.flush()
+            except (BrokenPipeError, OSError):
+                self.broken = True
+                if self.on_broken:
+                    self.on_broken()
 
     # Shorthands used by the jobs
-    def begin(self, step_id: str, label: str, index: int, count: int) -> None:
+    def begin(self, step_id: str, label: str, index: int, count: int, steps=None) -> None:
         self.step = step_id
-        self.emit("step", id=step_id, label=label, index=index, count=count)
+        self.emit("step", id=step_id, label=label, index=index, count=count, steps=steps or [step_id])
 
     def progress(self, value: float) -> None:
         self.emit("progress", step=self.step, value=round(float(value), 2))

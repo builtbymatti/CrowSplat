@@ -1,0 +1,5 @@
+build/
+CrowSplat.xcodeproj/
+CrowSplat/Resources/Viewer/index.js
+CrowSplat/Resources/Viewer/index.css
+CrowSplat/Resources/Viewer/gsaf-decoder.wasm

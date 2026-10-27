@@ -33,7 +33,7 @@ def write_splat(path: Path, count: int, rng: random.Random) -> None:
         r = rng.random() ** 0.5 * 2.0
         a, b = rng.uniform(0, 2 * math.pi), rng.uniform(-1, 1)
         x, y, z = r * math.cos(a) * (1 - b * b) ** 0.5, r * math.sin(a) * (1 - b * b) ** 0.5, r * b
-        scale = math.log(rng.uniform(0.005, 0.05)) if rng.random() > 0.01 else 1.5  # a few giants
+        scale = math.log(rng.uniform(0.004, 0.03)) if rng.random() > 0.01 else math.log(0.25)  # a few large ones
         rows += struct.pack("<17f", x, y, z, 0, 0, 0, rng.uniform(-1, 1), rng.uniform(-1, 1),
                             rng.uniform(-1, 1), rng.uniform(-4, 4), scale, scale, scale, 1, 0, 0, 0)
     path.write_bytes(("\n".join(header) + "\n").encode() + bytes(rows))

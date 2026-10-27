@@ -1,0 +1,75 @@
+name: CrowSplat
+options:
+  bundleIdPrefix: com.builtbymatti
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: MMT322XFLL
+    ENABLE_HARDENED_RUNTIME: YES
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+targets:
+  CrowSplat:
+    type: application
+    platform: macOS
+    sources:
+      - path: CrowSplat
+        excludes:
+          - "Resources/Fonts"
+          - "Resources/Viewer"
+          - "Resources/Licenses"
+          - "Resources/crow-path.txt"
+      # Folder references keep their layout inside Contents/Resources
+      - path: CrowSplat/Resources/Fonts
+        type: folder
+        buildPhase: resources
+      - path: CrowSplat/Resources/Viewer
+        type: folder
+        buildPhase: resources
+      - path: CrowSplat/Resources/Licenses
+        type: folder
+        buildPhase: resources
+    info:
+      path: CrowSplat/Info.plist
+      properties:
+        CFBundleDisplayName: CrowSplat
+        CFBundleName: CrowSplat
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.graphics-design
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        ATSApplicationFontsPath: Fonts
+        NSHumanReadableCopyright: "MIT License. Built on CorbeauSplat by Frederick."
+        CrowCoreRoot: $(CROW_CORE_ROOT)
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Gaussian Splat
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.polygon-file-format, public.data]
+            CFBundleTypeExtensions: [ply, sog, spz]
+    entitlements:
+      path: CrowSplat/CrowSplat.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        # The bundled CPython loads its own extension modules.
+        com.apple.security.cs.disable-library-validation: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.builtbymatti.crowsplat
+        PRODUCT_NAME: CrowSplat
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "Developer ID Application"
+        COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Debug:
+          # Debug builds run the core straight from this repository.
+          CROW_CORE_ROOT: $(SRCROOT)/..
+          CODE_SIGN_IDENTITY: "Apple Development"
+        Release:
+          CROW_CORE_ROOT: ""

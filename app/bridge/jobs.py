@@ -38,6 +38,8 @@ class JobContext:
         self.engine = None  # engine running now, stopped on cancel
 
     def cancel(self):
+        if self.cancelled.is_set():
+            return
         self.cancelled.set()
         engine = self.engine
         if engine is not None:
@@ -280,7 +282,7 @@ def job_scene(ctx: JobContext, job: dict) -> dict:
                     created=time.time(), steps=steps, outputs={})
 
     def begin(step):
-        ch.begin(step, labels[step], steps.index(step), len(steps))
+        ch.begin(step, labels[step], steps.index(step), len(steps), steps)
         _write_manifest(scene_dir, status="running", step=step)
 
     try:
@@ -322,6 +324,10 @@ def job_scene(ctx: JobContext, job: dict) -> dict:
         _write_manifest(scene_dir, status="cancelled", step=None)
         raise
     except Exception as e:
+        # An engine tripping over the closed pipe after a cancel is still a cancel.
+        if ctx.cancelled.is_set():
+            _write_manifest(scene_dir, status="cancelled", step=None)
+            raise Cancelled() from e
         _write_manifest(scene_dir, status="failed", step=None, error=str(e))
         raise
 

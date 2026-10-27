@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrowSplat viewer</title>
+<link rel="stylesheet" href="./index.css">
+<style>
+  /* The page is only a canvas; CrowSplat draws every control natively. */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0c0c0b; }
+  #viewer { position: absolute; inset: 0; }
+</style>
+</head>
+<body>
+<div id="viewer"></div>
+<script type="module">
+  import { createViewer } from './index.js';
+
+  const post = (type, payload = {}) => {
+    try { window.webkit.messageHandlers.crow.postMessage({ type, ...payload }); } catch (_) {}
+  };
+
+  const params = new URL(location.href).searchParams;
+  const content = params.get('content');
+
+  // Background matches the app canvas (#0c0c0b), no post effects: the splat as trained.
+  const settings = {
+    version: 2,
+    tonemapping: 'none',
+    highPrecisionRendering: false,
+    background: { color: [0.047, 0.047, 0.043] },
+    postEffectSettings: {
+      sharpness: { enabled: false, amount: 0 },
+      bloom: { enabled: false, intensity: 0.1, blurLevel: 2 },
+      grading: { enabled: false, brightness: 1, contrast: 1, saturation: 1, tint: [1, 1, 1] },
+      vignette: { enabled: false, intensity: 0.5, inner: 0.3, outer: 0.75, curvature: 1 },
+      fringing: { enabled: false, intensity: 0.5 }
+    },
+    animTracks: [],
+    cameras: [],
+    annotations: [],
+    startMode: 'default'
+  };
+
+  let viewer = null;
+
+  async function boot(renderer) {
+    viewer = await createViewer({
+      container: document.getElementById('viewer'),
+      settings,
+      contentUrl: content,
+      contentFilename: params.get('name') || undefined,
+      ui: false,
+      renderer
+    });
+    viewer.events.on('progress:changed', (p) => post('progress', { value: p }));
+    viewer.events.on('loaded:changed', (loaded) => {
+      if (loaded) { post('loaded', { renderer }); try { viewer.frameScene(); } catch (_) {} }
+    });
+    viewer.events.on('cameraMode:changed', (mode) => post('mode', { value: mode }));
+  }
+
+  // Commands from Swift: window.crow.frame(), .reset(), .mode('orbit' | 'fly')
+  window.crow = {
+    frame: () => viewer?.frameScene(),
+    reset: () => viewer?.resetCamera(),
+    mode: (m) => { if (viewer) viewer.state.cameraMode = m; }
+  };
+
+  if (!content) {
+    post('error', { message: 'No splat to show.' });
+  } else {
+    boot('webgpu').catch((e) => {
+      // Older WebKit without WebGPU: the WebGL path renders the same splat.
+      boot('webgl').catch((e2) => post('error', { message: String(e2 && e2.message || e2) }));
+    });
+  }
+  window.addEventListener('error', (e) => post('error', { message: String(e.message) }));
+</script>
+</body>
+</html>

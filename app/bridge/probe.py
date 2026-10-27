@@ -72,9 +72,11 @@ def probe() -> dict:
         engines.append({
             "id": name, "role": role, "purpose": purpose,
             "installed": installed, "version": version or "",
-            # COLMAP comes from Homebrew; everything else the core can fetch.
-            "installable": name != "colmap" or shutil.which("brew") is not None,
-            "via": "homebrew" if name == "colmap" else "download",
+            # COLMAP comes from Homebrew and SplatTransform from npm; the rest
+            # the core downloads on its own.
+            "installable": {"colmap": shutil.which("brew") is not None,
+                            "splat-transform": shutil.which("npm") is not None}.get(name, True),
+            "via": {"colmap": "homebrew", "splat-transform": "node"}.get(name, "download"),
         })
 
     memory = get_memory_info()

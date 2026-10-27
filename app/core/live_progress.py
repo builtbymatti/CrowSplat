@@ -34,6 +34,15 @@ def strip_ansi(text: str) -> str:
 _BRUSH_BAR_RE = re.compile(r"(\d+)\s*/\s*(\d+)\b.*\(\s*([\d.]+)\s*[^\s,]*/s\s*,.*remaining\s*\)")
 
 
+_BRUSH_SPLATS_RE = re.compile(r"Current splat count\s+(\d+)")
+
+
+def parse_brush_splat_count(line: str) -> int | None:
+    """Splats in the model right now, from Brush's "Current splat count N" line."""
+    match = _BRUSH_SPLATS_RE.search(strip_ansi(line))
+    return int(match.group(1)) if match else None
+
+
 def parse_brush_bar(line: str) -> tuple[int, int, float] | None:
     """(step, total_steps, steps_per_second) from a Brush training bar, or None."""
     match = _BRUSH_BAR_RE.search(strip_ansi(line))

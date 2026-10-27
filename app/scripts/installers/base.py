@@ -30,6 +30,9 @@ class EngineDependency:
         self.pinned_ref = pinned_ref
         self.root = self.resolve_data_root()
         self.engines_dir = self.root / "engines"
+        # A fresh data root (CrowSplat's Application Support) has no engines/
+        # yet; the repository checkout always shipped one.
+        self.engines_dir.mkdir(parents=True, exist_ok=True)
         self.version_file = self.engines_dir / f"{name}.version"
         self.target_dir = self.engines_dir / name
         self.bin_path = self.engines_dir / (bin_name if bin_name else name)

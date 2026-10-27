@@ -187,9 +187,10 @@ struct EngineRow: View {
                 }
             } else if install != nil && install?.failed == nil {
                 ProgressView().controlSize(.small)
-            } else if engine.via == "homebrew" && !model.engines.homebrew {
-                Link(destination: URL(string: "https://brew.sh")!) {
-                    Labeled("Get Homebrew", .external, iconSize: 12)
+            } else if !engine.installable {
+                // Needs a tool CrowSplat cannot install for you: point to it.
+                Link(destination: URL(string: engine.via == "node" ? "https://nodejs.org" : "https://brew.sh")!) {
+                    Labeled(engine.via == "node" ? "Get Node.js" : "Get Homebrew", .external, iconSize: 12)
                 }
                 .buttonStyle(.quiet)
             } else {

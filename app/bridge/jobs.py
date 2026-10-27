@@ -197,7 +197,8 @@ def _step_train(ctx, scene_dir: Path, job: dict) -> Path:
     _archive_existing_checkpoints(checkpoints, ch)
 
     engine = BrushEngine(logger_callback=ch.log,
-                         progress_callback=lambda pct, eta: (ch.progress(min(99.9, pct)), ch.eta(eta)))
+                         progress_callback=lambda pct, eta: (ch.progress(min(99.9, pct)), ch.eta(eta)),
+                         status_callback=ch.status)
     ctx.engine = engine
     stop = threading.Event()
     threading.Thread(target=_watch_checkpoints, args=(checkpoints, ctx, stop), daemon=True).start()

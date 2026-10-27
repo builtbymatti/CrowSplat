@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .base_engine import BaseEngine, IProcessRunner, PtyProcessRunner
-from .live_progress import RateLimiter, parse_brush_bar
+from .live_progress import RateLimiter, parse_brush_bar, parse_brush_splat_count
 from .system import adapt_max_splats, get_thermal_state, resolve_binary
 
 # Seconds between two training-bar lines copied into the log: the bar redraws
@@ -68,7 +68,8 @@ class BrushEngine(BaseEngine):
 
     def __init__(self, logger_callback: Callable | None = None, thermal_throttling: bool = False,
                  progress_callback: Callable[[float, float | None], None] | None = None,
-                 process_runner: IProcessRunner | None = None) -> None:
+                 process_runner: IProcessRunner | None = None,
+                 status_callback: Callable[[str], None] | None = None) -> None:
         """Initialize the Brush engine.
 
         Parameters
@@ -90,6 +91,7 @@ class BrushEngine(BaseEngine):
                          thermal_throttling=thermal_throttling)
         self.brush_bin = resolve_binary("brush")
         self.progress_callback = progress_callback
+        self.status_callback = status_callback
         # Set once a training bar has been parsed; the worker's checkpoint
         # poller stands down from then on.
         self.live_progress_seen = False
@@ -255,6 +257,9 @@ class BrushEngine(BaseEngine):
         """Training-bar redraws feed the progress; everything else is logged."""
         bar = parse_brush_bar(line)
         if bar is None:
+            splats = parse_brush_splat_count(line)
+            if splats is not None and self.status_callback:
+                self.status_callback(f"{splats:,} splats")
             self.log(line)
             return
         step, total, rate = bar

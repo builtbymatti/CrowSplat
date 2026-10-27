@@ -93,6 +93,7 @@ def main() -> int:
                 sys.stderr.write("\r" + CLEAR)
             write_splat(Path(args.export_path) / f"export_{pos}.ply", 4000, rng)
             print(f"Exported checkpoint export_{pos}.ply", flush=True)
+            print(f" Current splat count {60000 + pos * 41}", flush=True)
     if is_tty:
         sys.stderr.write("\n")
     write_splat(Path(args.export_path) / f"export_{args.total}.ply", 4000, rng)

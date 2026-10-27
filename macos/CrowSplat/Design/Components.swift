@@ -180,6 +180,9 @@ struct ChoiceBar<Value: Hashable>: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                // The lifted plate already marks the choice; a focus ring
+                // on top of it only adds a second, louder outline.
+                .focusEffectDisabled()
             }
         }
         .padding(2)
@@ -223,6 +226,7 @@ struct CheckRow: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled()
         .onHover { hovering = $0 }
         .animation(Motion.hover, value: hovering)
     }

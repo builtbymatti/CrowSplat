@@ -50,7 +50,11 @@ struct Sidebar: View {
             .padding(.bottom, 14)
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Palette.surface)
+        .background(Palette.surface.opacity(0.9))
+        .overlay(alignment: .trailing) {
+            // The panel's edge against the metal: dark rim, then a hairline of light.
+            HStack(spacing: 0) { Palette.rim.frame(width: 1); Palette.edge.frame(width: 1) }
+        }
         .animation(Motion.smooth, value: model.jobs.active?.id)
     }
 
@@ -81,8 +85,13 @@ private struct SidebarItem: View {
             .foregroundStyle(selected ? Palette.ink : (hovering ? Palette.ink2 : Palette.ink3))
             .padding(.horizontal, 10)
             .frame(height: 32)
-            .background(selected ? Palette.lifted : (hovering ? Palette.raised : .clear),
-                        in: .rect(cornerRadius: Metrics.controlRadius, style: .continuous))
+            .background {
+                if selected {
+                    Color.clear.surface(Palette.raised, radius: Metrics.controlRadius)
+                } else if hovering {
+                    RoundedRectangle(cornerRadius: Metrics.controlRadius, style: .continuous).fill(Palette.ink.opacity(0.03))
+                }
+            }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -109,8 +118,11 @@ private struct ActiveJobCard: View {
                     Text("\(Int(run.overall))%").font(.crowData).foregroundStyle(Palette.ink2)
                         .contentTransition(.numericText())
                 }
-                Text(run.stepLabel).font(.crowCaption).foregroundStyle(Palette.ink3).lineLimit(1)
-                ProgressTrack(value: run.progress < 0 && run.stepIndex == 0 ? -1 : run.overall, height: 2)
+                HStack(spacing: 6) {
+                    Circle().fill(Palette.signal).frame(width: 6, height: 6)
+                    Text(run.stepLabel).font(.crowCaption).foregroundStyle(Palette.ink3).lineLimit(1)
+                }
+                ProgressTrack(value: run.progress < 0 && run.stepIndex == 0 ? -1 : run.overall, height: 4)
             }
             .padding(12)
             .surface(hovering ? Palette.lifted : Palette.raised)

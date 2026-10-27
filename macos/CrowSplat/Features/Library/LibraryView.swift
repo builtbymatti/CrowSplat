@@ -48,7 +48,7 @@ struct LibraryView: View {
                 }
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .surface(Palette.surface, radius: Metrics.controlRadius)
+                .sunk(radius: Metrics.controlRadius)
             }
             Button { NewScenePicker.present(model: model) } label: { Labeled("New scene", .add) }
                 .buttonStyle(.primary)
@@ -72,10 +72,9 @@ private struct SceneCard: View {
         VStack(alignment: .leading, spacing: 11) {
             ZStack(alignment: .bottom) {
                 Thumbnail(url: run?.thumbnail ?? scene.thumbnailURL)
-                    .scaleEffect(hovering ? 1.025 : 1)
-                    .brightness(hovering ? 0.03 : 0)
+                    .brightness(hovering ? 0.04 : 0)
                 if let run {
-                    ProgressTrack(value: run.overall, height: 3)
+                    ProgressTrack(value: run.overall, height: 4)
                         .padding(10)
                 }
             }
@@ -84,6 +83,9 @@ private struct SceneCard: View {
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.radius, style: .continuous)
                     .strokeBorder(Palette.edge, lineWidth: 1)
+            }
+            .background {
+                RoundedRectangle(cornerRadius: Metrics.radius, style: .continuous).fill(Palette.rim).offset(y: 1)
             }
 
             VStack(alignment: .leading, spacing: 4) {

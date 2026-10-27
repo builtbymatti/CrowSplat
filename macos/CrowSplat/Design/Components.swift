@@ -2,58 +2,85 @@ import SwiftUI
 
 // MARK: - Buttons
 
-/// The one action a screen is about. Solid ink, dark label. Hover shifts the
-/// tone; press compresses a hair. It never jumps.
+/// The one action a screen is about: an aluminium face with a 3% vertical
+/// gradient and the emboss edges. Hover steps the tone up; a press moves one
+/// point and turns the light inward. No scale, no glow.
 struct PrimaryButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var enabled
     var wide = false
 
     func makeBody(configuration: Configuration) -> some View {
-        PrimaryBody(configuration: configuration, enabled: enabled, wide: wide)
-    }
-
-    private struct PrimaryBody: View {
-        let configuration: Configuration
-        let enabled: Bool
-        let wide: Bool
-        @State private var hovering = false
-
-        var body: some View {
-            configuration.label
-                .font(.crowLabel)
-                .foregroundStyle(Palette.canvas)
-                .padding(.horizontal, 14)
-                .frame(minWidth: wide ? 160 : nil, minHeight: 32)
-                .background(fill, in: .rect(cornerRadius: Metrics.controlRadius, style: .continuous))
-                .scaleEffect(configuration.isPressed ? 0.98 : 1)
-                .opacity(enabled ? 1 : 0.35)
-                .animation(Motion.hover, value: hovering)
-                .animation(Motion.snappy, value: configuration.isPressed)
-                .onHover { hovering = $0 }
-                .contentShape(.rect)
-        }
-
-        private var fill: Color {
-            if configuration.isPressed { return Palette.ink2 }
-            return hovering ? Color(hex: 0xFFFFFF) : Palette.ink
-        }
+        EmbossedButton(configuration: configuration, wide: wide, primary: true)
     }
 }
 
-/// Everything that is not the main action: label and optional icon, a tonal
-/// surface appears under it on hover.
-struct QuietButtonStyle: ButtonStyle {
+/// A second action that still deserves a key (Run again, Install): the panel
+/// tone with the same emboss, label in ink.
+struct SecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        EmbossedButton(configuration: configuration, wide: false, primary: false)
+    }
+}
+
+private struct EmbossedButton: View {
+    let configuration: ButtonStyleConfiguration
+    let wide: Bool
+    let primary: Bool
     @Environment(\.isEnabled) private var enabled
+    @State private var hovering = false
+
+    var body: some View {
+        let pressed = configuration.isPressed
+        let shape = RoundedRectangle(cornerRadius: Metrics.controlRadius, style: .continuous)
+        configuration.label
+            .font(.crowLabel)
+            .foregroundStyle(primary ? Color(hex: 0x141612) : Palette.ink)
+            .padding(.horizontal, 14)
+            .frame(minWidth: wide ? 150 : nil, minHeight: 32)
+            .background(face(pressed: pressed), in: shape)
+            .overlay {
+                // Lip on top at rest; when pressed the light falls inside instead.
+                shape.strokeBorder(LinearGradient(
+                    stops: pressed
+                        ? [.init(color: .black.opacity(0.22), location: 0), .init(color: .clear, location: 0.35)]
+                        : [.init(color: .white.opacity(primary ? 0.45 : 0.08), location: 0),
+                           .init(color: .clear, location: 0.2),
+                           .init(color: .black.opacity(primary ? 0.16 : 0.2), location: 1)],
+                    startPoint: .top, endPoint: .bottom), lineWidth: 1)
+            }
+            .background { if !pressed { shape.fill(Palette.rim).offset(y: 1) } }
+            .offset(y: pressed ? 1 : 0)
+            .opacity(enabled ? 1 : 0.35)
+            .animation(Motion.hover, value: hovering)
+            .animation(Motion.press, value: pressed)
+            .onHover { hovering = $0 }
+            .contentShape(.rect)
+    }
+
+    private func face(pressed: Bool) -> LinearGradient {
+        let (top, bottom): (UInt32, UInt32) = switch (primary, pressed, hovering && enabled) {
+        case (true, true, _): (0xADB1A8, 0xB6BAB1)
+        case (true, false, true): (0xCDD1C8, 0xBCC0B7)
+        case (true, false, false): (0xC3C7BE, 0xB2B6AD)
+        case (false, true, _): (0x23261F, 0x23261F)
+        case (false, false, true): (0x33372F, 0x2C2F29)
+        case (false, false, false): (0x2C2F29, 0x262923)
+        }
+        return LinearGradient(colors: [Color(hex: top), Color(hex: bottom)], startPoint: .top, endPoint: .bottom)
+    }
+}
+
+/// Everything else: label and icon, a quiet surface under it on hover.
+struct QuietButtonStyle: ButtonStyle {
     var tone: Color = Palette.ink2
 
     func makeBody(configuration: Configuration) -> some View {
-        QuietBody(configuration: configuration, enabled: enabled, tone: tone)
+        QuietBody(configuration: configuration, tone: tone)
     }
 
     private struct QuietBody: View {
         let configuration: Configuration
-        let enabled: Bool
         let tone: Color
+        @Environment(\.isEnabled) private var enabled
         @State private var hovering = false
 
         var body: some View {
@@ -62,9 +89,9 @@ struct QuietButtonStyle: ButtonStyle {
                 .foregroundStyle(hovering && enabled ? Palette.ink : tone)
                 .padding(.horizontal, 10)
                 .frame(minHeight: 30)
-                .background(hovering && enabled ? Palette.lifted : .clear,
+                .background(configuration.isPressed ? Palette.raised : (hovering && enabled ? Palette.lifted : .clear),
                             in: .rect(cornerRadius: Metrics.controlRadius, style: .continuous))
-                .opacity(enabled ? (configuration.isPressed ? 0.7 : 1) : 0.35)
+                .opacity(enabled ? 1 : 0.35)
                 .animation(Motion.hover, value: hovering)
                 .onHover { hovering = $0 }
                 .contentShape(.rect)
@@ -74,6 +101,10 @@ struct QuietButtonStyle: ButtonStyle {
 
 extension ButtonStyle where Self == PrimaryButtonStyle {
     static var primary: PrimaryButtonStyle { PrimaryButtonStyle() }
+}
+
+extension ButtonStyle where Self == SecondaryButtonStyle {
+    static var secondary: SecondaryButtonStyle { SecondaryButtonStyle() }
 }
 
 extension ButtonStyle where Self == QuietButtonStyle {
@@ -102,24 +133,29 @@ struct Labeled: View {
 
 // MARK: - Progress
 
-/// A slim track whose fill grows by width: the rounded caps stay round at
-/// every length, and the fill always reaches the full track at 100.
+/// A groove pressed into the surface; the fill is the one place signal orange
+/// is a surface. It grows by width, so the round caps stay round.
 struct ProgressTrack: View {
-    var value: Double          // 0-100; nil-like negative = indeterminate
-    var height: CGFloat = 3
-    var fill: Color = Palette.ink
+    var value: Double          // 0-100; negative = indeterminate
+    var height: CGFloat = 4
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Palette.ink4.opacity(0.6))
+                Capsule().fill(Palette.sunk)
+                    .overlay(Capsule().strokeBorder(LinearGradient(colors: [.black.opacity(0.5), .clear],
+                                                                   startPoint: .top, endPoint: .bottom), lineWidth: 1))
                 if value < 0 {
-                    IndeterminateSweep(height: height, fill: fill)
+                    IndeterminateSweep(height: height)
                 } else {
                     Capsule()
-                        .fill(fill)
+                        .fill(LinearGradient(colors: [Color(hex: 0xFF8650), Color(hex: 0xF0581B)],
+                                             startPoint: .top, endPoint: .bottom))
+                        .overlay(alignment: .top) {
+                            Capsule().fill(Color.white.opacity(0.3)).frame(height: 1).padding(.horizontal, height / 2)
+                        }
                         .frame(width: max(height, geo.size.width * min(1, value / 100)))
                         .animation(reduceMotion ? nil : Motion.smooth, value: value)
                 }
@@ -134,7 +170,6 @@ struct ProgressTrack: View {
 
 private struct IndeterminateSweep: View {
     let height: CGFloat
-    let fill: Color
 
     var body: some View {
         TimelineView(.animation) { tl in
@@ -142,7 +177,7 @@ private struct IndeterminateSweep: View {
                 let t = tl.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
                 let w = geo.size.width * 0.28
                 Capsule()
-                    .fill(fill.opacity(0.8))
+                    .fill(Palette.signal.opacity(0.85))
                     .frame(width: w, height: height)
                     .offset(x: -w + (geo.size.width + w) * t)
             }
@@ -150,17 +185,18 @@ private struct IndeterminateSweep: View {
     }
 }
 
-// MARK: - Choice
+// MARK: - Tabs
 
-/// Segmented choice with a sliding indicator. Selection reads through tone:
-/// the chosen label is ink on a lifted plate, the rest stay secondary.
+/// Navigation between a few views (Settings): a groove with one embossed
+/// plate that slides. Choices that set a value use the instruments in
+/// Instruments.swift instead.
 struct ChoiceBar<Value: Hashable>: View {
     let options: [(Value, String)]
     @Binding var selection: Value
     @Namespace private var plate
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             ForEach(options, id: \.0) { value, title in
                 let chosen = value == selection
                 Button {
@@ -173,62 +209,25 @@ struct ChoiceBar<Value: Hashable>: View {
                         .background {
                             if chosen {
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(Palette.lifted)
+                                    .fill(LinearGradient(colors: [Color(hex: 0x34382F), Color(hex: 0x2C2F28)],
+                                                         startPoint: .top, endPoint: .bottom))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .strokeBorder(LinearGradient(stops: [.init(color: .white.opacity(0.1), location: 0),
+                                                                                 .init(color: .clear, location: 0.3)],
+                                                                         startPoint: .top, endPoint: .bottom), lineWidth: 1)
+                                    }
                                     .matchedGeometryEffect(id: "plate", in: plate)
                             }
                         }
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                // The lifted plate already marks the choice; a focus ring
-                // on top of it only adds a second, louder outline.
                 .focusEffectDisabled()
             }
         }
         .padding(2)
-        .surface(Palette.canvas, radius: Metrics.controlRadius)
-    }
-}
-
-/// A checkbox that is a sentence: the box, a title, a quiet explanation.
-struct CheckRow: View {
-    let title: String
-    var detail: String? = nil
-    @Binding var isOn: Bool
-    @State private var hovering = false
-
-    var body: some View {
-        Button {
-            withAnimation(Motion.snappy) { isOn.toggle() }
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(isOn ? Palette.ink : Palette.canvas)
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(isOn ? .clear : (hovering ? Palette.ink3 : Palette.ink4), lineWidth: 1)
-                    if isOn {
-                        Icon(.check, size: 11)
-                            .foregroundStyle(Palette.canvas)
-                            .transition(.scale(scale: 0.4).combined(with: .opacity))
-                    }
-                }
-                .frame(width: 15, height: 15)
-                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.crowBody).foregroundStyle(Palette.ink)
-                    if let detail {
-                        Text(detail).font(.crowCaption).foregroundStyle(Palette.ink3)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .onHover { hovering = $0 }
-        .animation(Motion.hover, value: hovering)
+        .sunk(radius: Metrics.controlRadius)
     }
 }
 
@@ -242,7 +241,7 @@ struct FieldStyle: TextFieldStyle {
             .foregroundStyle(Palette.ink)
             .padding(.horizontal, 10)
             .frame(height: 32)
-            .surface(Palette.canvas, radius: Metrics.controlRadius)
+            .sunk(radius: Metrics.controlRadius)
     }
 }
 

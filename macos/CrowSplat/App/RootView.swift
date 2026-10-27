@@ -3,10 +3,11 @@ import UniformTypeIdentifiers
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @State private var pointer = CGPoint(x: 0.75, y: 0.3)
 
     var body: some View {
         ZStack {
-            Palette.canvas.ignoresSafeArea()
+            InstrumentBackground(strength: model.onboarded ? 0.6 : 1, pointer: pointer)
             if model.onboarded {
                 MainView()
                     .transition(.opacity)
@@ -15,6 +16,7 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
+        .modifier(PointerLight(point: $pointer))
         .animation(Motion.gentle, value: model.onboarded)
         .task {
             #if DEBUG
@@ -47,7 +49,6 @@ struct MainView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Palette.canvas)
             .overlay { if dropTargeted { DropHighlight() } }
         }
         .ignoresSafeArea(.container, edges: .top)

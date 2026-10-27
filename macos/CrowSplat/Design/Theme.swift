@@ -1,21 +1,27 @@
+import CoreText
 import SwiftUI
 
-/// CrowSplat's whole palette. Off-white ink on a near-black that leans warm,
-/// never blue. There is no brand hue: emphasis is tonal (a step lighter or
-/// darker), and colour is reserved for the one thing that needs it, failure.
+/// CrowSplat's palette: the Instrument direction, set clean. Anodized metal
+/// greys that lean olive, aluminium for the one control that matters, and
+/// signal orange only where something is happening (progress, running,
+/// keyboard focus). Never a surface, never a glow.
 enum Palette {
-    static let canvas   = Color(hex: 0x0C0C0B)   // window background
-    static let surface  = Color(hex: 0x131312)   // panels, sidebar
-    static let raised   = Color(hex: 0x1A1A19)   // cards, fields
-    static let lifted   = Color(hex: 0x222220)   // hover / pressed surfaces
-    static let ink      = Color(hex: 0xEDECE7)   // primary text, the crow
-    static let ink2     = Color(hex: 0xA8A59E)   // secondary text
-    static let ink3     = Color(hex: 0x6E6B65)   // tertiary, captions
-    static let ink4     = Color(hex: 0x3D3B38)   // disabled, tracks
-    static let failure  = Color(hex: 0xD98A74)   // muted brick, only for errors
-    /// The edge of a surface is its own colour, lifted, not a drawn line.
-    static let edge     = Color.white.opacity(0.055)
-    static let lip      = Color.white.opacity(0.07)  // top highlight on raised surfaces
+    static let canvas   = Color(hex: 0x161814)   // anodized: window, shader base
+    static let surface  = Color(hex: 0x1E201C)   // panels, sidebar, sheets
+    static let raised   = Color(hex: 0x262923)   // cards, fields, selected row
+    static let lifted   = Color(hex: 0x2E322B)   // hover
+    static let sunk     = Color(hex: 0x121410)   // grooves and tracks, below the surface
+    static let ink      = Color(hex: 0xE7E9E2)   // label: text, the crow
+    static let ink2     = Color(hex: 0x9A9F93)   // secondary text
+    static let ink3     = Color(hex: 0x6C7066)   // captions
+    static let ink4     = Color(hex: 0x3B3F37)   // disabled, ticks
+    static let alu      = Color(hex: 0xB9BDB4)   // the primary control face
+    static let signal   = Color(hex: 0xFF6B2C)   // information only
+    static let failure  = Color(hex: 0xE5484D)   // errors: red, clearly not "running"
+    /// The emboss from the colour cards: a light lip on top, a dark rim below.
+    static let lip      = Color.white.opacity(0.07)
+    static let edge     = Color.white.opacity(0.035)
+    static let rim      = Color.black.opacity(0.38)
 }
 
 enum Metrics {
@@ -25,13 +31,14 @@ enum Metrics {
     static let sidebarWidth: CGFloat = 220
 }
 
-/// Motion tokens. Springs over curves: they settle instead of stopping, and
-/// an interrupted animation keeps its velocity.
+/// Motion tokens. Controls never scale; motion is reserved for things that
+/// move for a reason (a detent snapping, a value changing, progress).
 enum Motion {
-    static let snappy = Animation.spring(response: 0.28, dampingFraction: 0.86)
-    static let smooth = Animation.spring(response: 0.45, dampingFraction: 0.9)
-    static let gentle = Animation.spring(response: 0.7, dampingFraction: 0.92)
+    static let snappy = Animation.spring(response: 0.28, dampingFraction: 0.9)
+    static let smooth = Animation.spring(response: 0.42, dampingFraction: 0.92)
+    static let gentle = Animation.spring(response: 0.7, dampingFraction: 0.94)
     static let hover = Animation.easeOut(duration: 0.14)
+    static let press = Animation.easeOut(duration: 0.08)
 }
 
 extension Color {
@@ -46,57 +53,94 @@ extension Color {
 
 // MARK: - Type
 
-/// Geist for everything; Geist Mono only where the content is data
-/// (step counts, file sizes, durations, paths).
+/// Alpha Lyrae (Fontfabric for Vega, SIL OFL) for everything. It has one
+/// weight, so hierarchy comes from size and tone. By default every fourth
+/// glyph swaps to a pixel alternate (its `calt` feature); UI text turns that
+/// off, and only the wordmark keeps it. Geist Mono stays for logs and paths.
 enum Typeface {
+    /// `weight` is kept so call sites read naturally; the face has one weight.
     static func sans(_ size: CGFloat, _ weight: Weight = .regular) -> Font {
-        .custom(weight.postscript, size: size)
+        alpha(size, glitch: false)
+    }
+
+    /// The wordmark: Alpha Lyrae with its pixel alternates on.
+    static func wordmark(_ size: CGFloat) -> Font {
+        alpha(size, glitch: true)
     }
 
     static func mono(_ size: CGFloat, medium: Bool = false) -> Font {
         .custom(medium ? "GeistMono-Medium" : "GeistMono-Regular", size: size)
     }
 
-    enum Weight {
-        case regular, medium, semibold, bold
-        var postscript: String {
-            switch self {
-            case .regular: "Geist-Regular"
-            case .medium: "Geist-Medium"
-            case .semibold: "Geist-SemiBold"
-            case .bold: "Geist-Bold"
-            }
+    enum Weight { case regular, medium, semibold, bold }
+
+    private static func alpha(_ size: CGFloat, glitch: Bool) -> Font {
+        var attributes: [CFString: Any] = [kCTFontNameAttribute: "AlphaLyrae-Medium" as CFString]
+        if !glitch {
+            attributes[kCTFontFeatureSettingsAttribute] = [[
+                kCTFontOpenTypeFeatureTag: "calt" as CFString,
+                kCTFontOpenTypeFeatureValue: 0,
+            ] as [CFString: Any]]
         }
+        let descriptor = CTFontDescriptorCreateWithAttributes(attributes as CFDictionary)
+        return Font(CTFontCreateWithFontDescriptor(descriptor, size, nil))
     }
 }
 
 extension Font {
-    static let crowDisplay = Typeface.sans(40, .semibold)
-    static let crowTitle   = Typeface.sans(24, .semibold)
-    static let crowHeading = Typeface.sans(15, .medium)
-    static let crowBody    = Typeface.sans(13)
-    static let crowLabel   = Typeface.sans(12, .medium)
-    static let crowCaption = Typeface.sans(11.5)
-    static let crowData    = Typeface.mono(11.5)
+    static let crowDisplay = Typeface.sans(40)
+    static let crowTitle   = Typeface.sans(25)
+    static let crowHeading = Typeface.sans(15)
+    static let crowBody    = Typeface.sans(13.5)
+    static let crowLabel   = Typeface.sans(12.5)
+    static let crowCaption = Typeface.sans(12)
+    static let crowData    = Typeface.sans(12).monospacedDigit()
+    static let crowLog     = Typeface.mono(11.5)
 }
 
 // MARK: - Surfaces
 
-/// A panel lifted off the canvas by tone and a self-coloured edge with a
-/// faint top lip, the way light catches a rounded rim. No drop shadow.
+/// A panel set off by tone and the emboss: a 1 pt light lip along the top,
+/// a hairline of its own colour around it, a 1 pt dark rim underneath. The
+/// same edge as the colour cards on the brand page. No blur, no glow.
 struct SurfaceModifier: ViewModifier {
     var fill: Color = Palette.raised
     var radius: CGFloat = Metrics.radius
 
     func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         content
-            .background(fill, in: .rect(cornerRadius: radius, style: .continuous))
+            .background(fill, in: shape)
             .overlay {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(colors: [Palette.lip, Palette.edge, Palette.edge.opacity(0.6)],
-                                       startPoint: .top, endPoint: .bottom),
-                        lineWidth: 1)
+                shape.strokeBorder(Palette.edge, lineWidth: 1)
+                shape.strokeBorder(LinearGradient(stops: [.init(color: Palette.lip, location: 0),
+                                                          .init(color: .clear, location: 0.12)],
+                                                  startPoint: .top, endPoint: .bottom), lineWidth: 1)
+            }
+            .background {
+                // The rim: the panel's lower edge catching no light.
+                shape.fill(Palette.rim).offset(y: 1)
+            }
+    }
+}
+
+/// The opposite of a surface: a groove pressed into it (tracks, wells).
+struct SunkModifier: ViewModifier {
+    var radius: CGFloat = Metrics.controlRadius
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        content
+            .background(Palette.sunk, in: shape)
+            .overlay {
+                shape.strokeBorder(LinearGradient(colors: [.black.opacity(0.45), .clear],
+                                                  startPoint: .top, endPoint: .center), lineWidth: 1)
+            }
+            .overlay(alignment: .bottom) {
+                // Light catching the far lip of the groove.
+                shape.strokeBorder(LinearGradient(stops: [.init(color: .clear, location: 0.8),
+                                                          .init(color: Palette.edge, location: 1)],
+                                                  startPoint: .top, endPoint: .bottom), lineWidth: 1)
             }
     }
 }
@@ -104,6 +148,10 @@ struct SurfaceModifier: ViewModifier {
 extension View {
     func surface(_ fill: Color = Palette.raised, radius: CGFloat = Metrics.radius) -> some View {
         modifier(SurfaceModifier(fill: fill, radius: radius))
+    }
+
+    func sunk(radius: CGFloat = Metrics.controlRadius) -> some View {
+        modifier(SunkModifier(radius: radius))
     }
 }
 

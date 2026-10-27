@@ -217,7 +217,7 @@ private struct ToolSheet: View {
             .foregroundStyle(Palette.ink)
             .padding(16)
             .frame(maxWidth: .infinity)
-            .background(dropTargeted ? Palette.lifted : Palette.canvas,
+            .background(dropTargeted ? Palette.lifted : Palette.sunk,
                         in: .rect(cornerRadius: Metrics.radius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.radius, style: .continuous)
@@ -241,7 +241,11 @@ private struct ToolSheet: View {
         case .clean:
             VStack(alignment: .leading, spacing: 7) {
                 FieldLabel("Strength")
-                ChoiceBar(options: [("light", "Light"), ("medium", "Medium"), ("strong", "Strong")], selection: $strength)
+                DetentScale(stops: [
+                    .init(value: "light", title: "Light", readout: "Only the obvious: near-invisible and giant splats."),
+                    .init(value: "medium", title: "Medium", readout: "Also floaters far from the scene. Right for most splats."),
+                    .init(value: "strong", title: "Strong", readout: "Aggressive. Check thin details like plants and railings after."),
+                ], selection: $strength)
             }
         case .convert:
             VStack(alignment: .leading, spacing: 10) {
@@ -256,12 +260,17 @@ private struct ToolSheet: View {
         case .upscale:
             VStack(alignment: .leading, spacing: 7) {
                 FieldLabel("Scale")
-                ChoiceBar(options: [(2, "2×"), (3, "3×"), (4, "4×")], selection: $scale)
+                DetentScale(stops: [
+                    .init(value: 2, title: "2×", readout: "Twice the width and height. Fast."),
+                    .init(value: 3, title: "3×", readout: "Three times. A good middle."),
+                    .init(value: 4, title: "4×", readout: "Four times, the model's native scale. Slowest, sharpest."),
+                ], selection: $scale)
             }
         case .fourdgs:
             VStack(alignment: .leading, spacing: 7) {
                 FieldLabel("Frames per second")
-                ChoiceBar(options: [(2, "2"), (5, "5"), (10, "10")], selection: $fps)
+                ScrubValue(values: [1, 2, 3, 5, 8, 10, 15], value: $fps, unit: "fps",
+                           readout: "Taken from every camera's video")
             }
         default:
             EmptyView()

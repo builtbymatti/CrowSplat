@@ -25,6 +25,7 @@ struct NewSceneSheet: View {
                 .frame(width: 340)
                 .frame(maxHeight: .infinity)
                 .background(Palette.canvas)
+                .overlay(alignment: .trailing) { Palette.rim.frame(width: 1) }
             form
                 .frame(width: 420)
         }
@@ -80,25 +81,24 @@ struct NewSceneSheet: View {
 
                 VStack(alignment: .leading, spacing: 7) {
                     FieldLabel("Detail")
-                    ChoiceBar(options: [("draft", "Draft"), ("standard", "Standard"), ("fine", "Fine")],
-                              selection: $quality)
-                    Text(qualityNote).font(.crowCaption).foregroundStyle(Palette.ink3)
-                        .contentTransition(.opacity)
-                        .animation(Motion.smooth, value: quality)
+                    DetentScale(stops: [
+                        .init(value: "draft", title: "Draft", readout: "7,000 steps. A quick look, good for checking coverage."),
+                        .init(value: "standard", title: "Standard", readout: "30,000 steps. Balanced detail and time, right for most rooms."),
+                        .init(value: "fine", title: "Fine", readout: "50,000 steps, denser splats, undistorted frames. The longest run."),
+                    ], selection: $quality)
                 }
 
                 if case .video? = source?.kind {
                     VStack(alignment: .leading, spacing: 7) {
                         FieldLabel("Frames per second")
-                        ChoiceBar(options: [(2, "2"), (3, "3"), (5, "5"), (8, "8")], selection: $fps)
-                        Text(frameNote).font(.crowCaption).foregroundStyle(Palette.ink3)
+                        ScrubValue(values: [1, 2, 3, 4, 5, 6, 8, 10], value: $fps, unit: "fps", readout: frameNote)
                     }
                     CheckRow(title: "360° video", detail: "Split an equirectangular video into camera views first",
                              isOn: $is360)
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    FieldLabel("When it is trained")
+                VStack(alignment: .leading, spacing: 2) {
+                    FieldLabel("When it is trained").padding(.bottom, 4)
                     CheckRow(title: "Remove floaters", detail: "Drops stray, oversized and transparent splats",
                              isOn: $clean)
                     CheckRow(title: "Export SOG", detail: "Small, streams fast on the web", isOn: $exportSOG)
@@ -130,18 +130,11 @@ struct NewSceneSheet: View {
         .padding(28)
     }
 
-    private var qualityNote: String {
-        switch quality {
-        case "draft": "A quick look in a fraction of the time. Good for checking coverage."
-        case "fine": "Most detail and sharper edges. The longest run."
-        default: "Balanced detail and time. Right for most rooms."
-        }
-    }
 
     private var frameNote: String {
         let seconds = trim.upperBound - trim.lowerBound
         let frames = Int(seconds * Double(fps))
-        return "About \(frames) frames from \(Format.clock(seconds)) of video."
+        return "About \(frames) frames from \(Format.clock(seconds))"
     }
 
     private var canStart: Bool {

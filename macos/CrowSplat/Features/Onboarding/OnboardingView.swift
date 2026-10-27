@@ -13,12 +13,11 @@ struct OnboardingView: View {
             SplatField(formation: formation)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(48)
-                .background(Palette.canvas)
 
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
                     CrowMark(height: 14)
-                    Text("CrowSplat").font(Typeface.sans(13, .semibold))
+                        .accessibilityLabel("CrowSplat")
                     Spacer()
                     StepDots(count: 3, current: step)
                 }
@@ -58,7 +57,10 @@ struct OnboardingView: View {
             .padding(.horizontal, 44)
             .frame(width: 440)
             .frame(maxHeight: .infinity)
-            .background(Palette.surface)
+            .background(Palette.surface.opacity(0.92))
+            .overlay(alignment: .leading) {
+                HStack(spacing: 0) { Palette.edge.frame(width: 1); Palette.rim.frame(width: 1) }
+            }
         }
         .onAppear {
             withAnimation(.easeOut(duration: 2.6).delay(0.2)) { formation = 1 }
@@ -98,8 +100,13 @@ private struct WelcomeStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            // The one place the pixel alternates show: the name, large.
+            Text("CrowSplat")
+                .font(Typeface.wordmark(58))
+                .foregroundStyle(Palette.ink)
+                .padding(.bottom, 4)
             Text("Walk through it again, from anywhere.")
-                .font(Typeface.sans(30, .semibold))
+                .font(Typeface.sans(22))
                 .foregroundStyle(Palette.ink)
                 .fixedSize(horizontal: false, vertical: true)
             Text("Film a room or take a set of photos. CrowSplat turns them into a Gaussian splat you can orbit, fly through and share, trained right here on your Mac.")

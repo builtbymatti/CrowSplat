@@ -227,7 +227,7 @@ class SettingsWindow(QDialog):
             self.resetRequested.emit(diag.result_deep)
 
     def _open_changelog(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(resolve_project_root() / "CHANGELOG.md")))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(resolve_project_root() / "docs" / "corbeausplat" / "CHANGELOG.md")))
 
     def retranslate_ui(self):
         self.setWindowTitle(tr("settings_title", "Réglages généraux"))

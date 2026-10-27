@@ -10,7 +10,7 @@
 
 </div>
 
-![CorbeauSplat Interface](assets/interface.png)
+![CorbeauSplat Interface](../../assets/interface.png)
 
 ## 🚀 What it does
 

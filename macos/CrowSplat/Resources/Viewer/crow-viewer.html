@@ -65,6 +65,10 @@
     viewer.events.on('progress:changed', (p) => post('progress', { value: p }));
     viewer.events.on('loaded:changed', (loaded) => {
       if (!loaded) return;
+      // CrowSplat reads the movement keys natively and steers through
+      // setMoveInput; the viewer's own key handling stays off so the two
+      // never disagree about which keys are held.
+      try { viewer.state.inputEnabled = false; } catch (_) {}
       post('loaded', { renderer });
       // With our own start camera the authored view is already right; only
       // fall back to fitting the whole scene when we could not compute one.
@@ -77,7 +81,8 @@
   window.crow = {
     frame: () => startCamera ? viewer?.resetCamera() : viewer?.frameScene(),
     reset: () => viewer?.resetCamera(),
-    mode: (m) => { if (viewer) viewer.state.cameraMode = m; }
+    mode: (m) => { if (viewer) viewer.state.cameraMode = m; },
+    move: (x, z) => { try { viewer?.setMoveInput(x, z); } catch (_) {} }
   };
 
   if (!content) {

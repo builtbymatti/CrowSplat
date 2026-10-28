@@ -117,7 +117,7 @@ struct SceneDetailView: View {
                         ViewerControls(viewer: viewer)
                         if viewer.mode == "fly" {
                             // Fly mode's keys, taken from the viewer's own bindings.
-                            Text("W A S D  move   ·   Q E  down, up   ·   Shift  faster   ·   drag  look")
+                            Text("W A S D or arrows  move   ·   drag  look around")
                                 .font(.crowCaption).foregroundStyle(Palette.ink2)
                                 .padding(.horizontal, 12).frame(height: 30)
                                 .glassPlate()

@@ -110,13 +110,52 @@ struct ViewerView: NSViewRepresentable {
     }
 }
 
-/// A web view that takes the keyboard when clicked, so fly mode's keys work.
+/// A web view that takes the keyboard when clicked and handles the movement
+/// keys itself: W A S D and the arrows are tracked as held or released here
+/// and sent to the viewer as one movement vector, so every press and release
+/// lands, and none of them reaches the page (or beeps).
 final class CrowWebView: WKWebView {
+    private var held = Set<UInt16>()
+
+    // Key codes: W A S D and the arrow keys.
+    private static let forward: Set<UInt16> = [13, 126]
+    private static let back: Set<UInt16> = [1, 125]
+    private static let left: Set<UInt16> = [0, 123]
+    private static let right: Set<UInt16> = [2, 124]
+    private static let movement = forward.union(back).union(left).union(right)
+
     override var acceptsFirstResponder: Bool { true }
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         super.mouseDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard Self.movement.contains(event.keyCode), event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
+            return super.keyDown(with: event)
+        }
+        if !event.isARepeat { held.insert(event.keyCode); sendMove() }
+    }
+
+    override func keyUp(with event: NSEvent) {
+        guard Self.movement.contains(event.keyCode) else { return super.keyUp(with: event) }
+        held.remove(event.keyCode)
+        sendMove()
+    }
+
+    /// Losing focus (a click elsewhere, another window) releases everything,
+    /// so the camera never keeps drifting on a key we will not hear go up.
+    override func resignFirstResponder() -> Bool {
+        if !held.isEmpty { held.removeAll(); sendMove() }
+        return super.resignFirstResponder()
+    }
+
+    private func sendMove() {
+        func any(_ keys: Set<UInt16>) -> Int { held.isDisjoint(with: keys) ? 0 : 1 }
+        let x = any(Self.right) - any(Self.left)
+        let z = any(Self.forward) - any(Self.back)
+        evaluateJavaScript("window.crow.move(\(x), \(z))")
     }
 }
 

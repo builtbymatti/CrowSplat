@@ -40,13 +40,17 @@ CrowSplat is a ground-up frontend for [CorbeauSplat](https://github.com/freddewi
 
 ## Design
 
-The brief was a fixed design language, white on black, with the crow as the mark, and nothing that looks generated.
+The brief: keep the app quiet and clean, and give it about a fifth more brand and feel than a plain dark UI. The result is called Instrument: the app as a measuring instrument for rooms.
 
-- **The signature is the subject.** The crow is drawn the way the app draws everything: as about 1,500 soft, anisotropic Gaussians sampled inside the logo's outline. They drift in as a cloud, settle into the silhouette, breathe and part around the pointer. The same field is the onboarding hero, the empty library, the waiting state of a scene and the app icon, all rendered from one Swift file.
-- **One palette, no brand hue.** Off-white ink on a near-black that leans warm, never blue. Emphasis is tonal, a step lighter or darker. The only colour in the app is a muted brick, and only for failure.
-- **Surfaces without lines.** Panels lift off the canvas by tone and a self-coloured edge with a faint top lip, the way light catches a rounded rim. No drop shadows. Glass is used once, for the camera controls, where there is a live 3D scene behind it to refract.
-- **Type and icons.** Geist throughout, Geist Mono only for data (step counts, durations, paths). Icons from [Gravity UI](https://gravity-ui.com/icons), a complete and rarely seen set on a 16 px grid, always bare, never in a tile.
-- **Motion that means something.** Springs over curves, so interrupted animations keep their velocity. Progress bars grow by width with stable caps and glide between updates instead of jumping. Nothing waits on an animation to become visible.
+- **The room carries the brand, the controls stay out of the way.** Behind the window runs a Metal shader of brushed anodized metal with survey contour lines drifting across it, lit from the top and faintly from the pointer. Panels sit on it with an emboss: a light lip along the top edge and a dark rim below. No glow, no drop shadows, nothing scales.
+- **One signal colour.** Olive-leaning metal greys, aluminium for the one action a screen is about, and signal orange only where something is happening: progress, the running job, keyboard focus. Never a button.
+- **Alpha Lyrae.** One weight, used everywhere, so hierarchy comes from size and tone. Its pixel alternates (every fourth glyph by default) are switched off in the interface and kept only in the wordmark.
+- **Controls drawn as instruments.** An ordered choice like detail or cleaning strength is a scale with detents and an embossed slider that snaps into place, with what the stop means written beside it. Frame rate is a number you drag sideways. On/off settings are rows with an indicator lamp that lights when on.
+- **The crow as splats.** About 1,500 soft, anisotropic Gaussians sampled inside the logo drift in as a cloud and settle into the silhouette. The same field is the onboarding hero, the empty library, the waiting state of a scene and the app icon.
+
+<p align="center">
+  <img src="docs/images/new-scene.png" alt="New scene: detail scale, frame rate scrub value and indicator toggles" width="860">
+</p>
 
 ## Install
 
@@ -117,7 +121,8 @@ The original Qt app and CLI still run from this repository with `python main.py`
 - [COLMAP](https://colmap.github.io), BSD
 - [Brush](https://github.com/ArthurBrussee/brush) by Arthur Brussee, Apache-2.0
 - [SuperSplat Viewer](https://github.com/playcanvas/supersplat-viewer) and [splat-transform](https://github.com/playcanvas/splat-transform) by PlayCanvas, MIT
-- [Geist](https://vercel.com/font) by Vercel, SIL OFL 1.1
+- [Alpha Lyrae](https://github.com/vegaprotocol/alpha-lyrae) by Fontfabric for Vega, SIL OFL 1.1
+- [Geist Mono](https://vercel.com/font) by Vercel, SIL OFL 1.1 (log view)
 - [Gravity UI icons](https://gravity-ui.com/icons), MIT
 
 ## License

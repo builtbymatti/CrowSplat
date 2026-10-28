@@ -53,6 +53,7 @@ struct LibraryView: View {
             Button { NewScenePicker.present(model: model) } label: { Labeled("New scene", .add) }
                 .buttonStyle(.primary)
                 .keyboardShortcut("n")
+                .focusEffectDisabled()  // first responder at launch; ⌘N is its keyboard path
         }
         .padding(.horizontal, Metrics.gutter)
         .padding(.top, 46)

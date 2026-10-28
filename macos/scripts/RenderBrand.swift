@@ -30,7 +30,7 @@ struct AppIcon: View {
         let body = canvas * 0.805
         ZStack {
             RoundedRectangle(cornerRadius: body * 0.225, style: .continuous)
-                .fill(LinearGradient(colors: [Color(hex: 0x1C1C1A), Color(hex: 0x0C0C0B)],
+                .fill(LinearGradient(colors: [Color(hex: 0x2A2D27), Color(hex: 0x161814)],
                                      startPoint: .top, endPoint: .bottom))
                 .overlay {
                     // The lip: light catching the top edge, the same move as every surface in the app.
@@ -61,12 +61,12 @@ struct DMGBackground: View {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
                     CrowShape().fill(Palette.ink).frame(width: 22, height: 16)
-                    Text("CrowSplat").font(.custom("Geist-SemiBold", size: 15)).foregroundStyle(Palette.ink)
+                    Text("CrowSplat").font(.custom("AlphaLyrae-Medium", size: 16)).foregroundStyle(Palette.ink)
                 }
                 .padding(.top, 34)
                 Spacer()
                 Text("Drag CrowSplat into Applications")
-                    .font(.custom("Geist-Regular", size: 13))
+                    .font(.custom("AlphaLyrae-Medium", size: 13))
                     .foregroundStyle(Palette.ink3)
                     .padding(.bottom, 40)
             }

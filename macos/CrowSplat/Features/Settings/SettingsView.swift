@@ -87,7 +87,7 @@ private struct AboutSection: View {
         ("Brush", "Gaussian splat training by Arthur Brussee", "https://github.com/ArthurBrussee/brush"),
         ("SuperSplat Viewer", "rendering, by PlayCanvas", "https://github.com/playcanvas/supersplat-viewer"),
         ("splat-transform", "format conversion, by PlayCanvas", "https://github.com/playcanvas/splat-transform"),
-        ("Geist", "typeface by Vercel, SIL OFL", "https://vercel.com/font"),
+        ("Alpha Lyrae", "typeface by Fontfabric for Vega, SIL OFL", "https://github.com/vegaprotocol/alpha-lyrae"),
         ("Gravity UI icons", "MIT", "https://gravity-ui.com/icons"),
     ]
 

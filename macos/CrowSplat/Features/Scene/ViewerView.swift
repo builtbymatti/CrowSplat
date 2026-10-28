@@ -10,11 +10,19 @@ final class ViewerController {
     var mode = "orbit"
     fileprivate weak var webView: WKWebView?
 
-    func frame() { webView?.evaluateJavaScript("window.crow.frame()") }
-    func reset() { webView?.evaluateJavaScript("window.crow.reset()") }
+    func frame() { webView?.evaluateJavaScript("window.crow.frame()"); focusKeys() }
+    func reset() { webView?.evaluateJavaScript("window.crow.reset()"); focusKeys() }
     func setMode(_ m: String) {
         mode = m
         webView?.evaluateJavaScript("window.crow.mode('\(m)')")
+        focusKeys()
+    }
+
+    /// Hand the keyboard to the 3D view, so WASD reach the viewer instead of
+    /// the SwiftUI button that was just clicked (which answers with a beep).
+    func focusKeys() {
+        guard let web = webView else { return }
+        web.window?.makeFirstResponder(web)
     }
 }
 
@@ -31,7 +39,7 @@ struct ViewerView: NSViewRepresentable {
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(CrowSchemeHandler(), forURLScheme: CrowSchemeHandler.scheme)
         config.userContentController.add(context.coordinator, name: "crow")
-        let web = WKWebView(frame: .zero, configuration: config)
+        let web = CrowWebView(frame: .zero, configuration: config)
         web.setValue(false, forKey: "drawsBackground")   // no white flash before the first frame
         web.underPageBackgroundColor = NSColor(red: 0.047, green: 0.047, blue: 0.043, alpha: 1)
         controller.webView = web
@@ -56,11 +64,26 @@ struct ViewerView: NSViewRepresentable {
         components.scheme = CrowSchemeHandler.scheme
         components.host = "viewer"
         components.path = "/crow-viewer.html"
-        components.queryItems = [
+        let baseItems = [
             URLQueryItem(name: "content", value: CrowSchemeHandler.fileURL(for: url)),
             URLQueryItem(name: "name", value: url.lastPathComponent),
         ]
-        if let page = components.url { web.load(URLRequest(url: page)) }
+        // Start on the bulk of the splat, not its full bounding box (floaters
+        // would push the camera far out). Computed off the main thread.
+        let base = components
+        DispatchQueue.global(qos: .userInitiated).async {
+            var items = baseItems
+            var components = base
+            if let f = SplatFraming.compute(for: url) {
+                let fmt = { (v: Float) in String(format: "%.4f", v) }
+                items.append(URLQueryItem(name: "target", value: [f.target.x, f.target.y, f.target.z].map(fmt).joined(separator: ",")))
+                items.append(URLQueryItem(name: "camera", value: [f.position.x, f.position.y, f.position.z].map(fmt).joined(separator: ",")))
+            }
+            components.queryItems = items
+            DispatchQueue.main.async {
+                if let page = components.url { web.load(URLRequest(url: page)) }
+            }
+        }
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler {
@@ -73,13 +96,27 @@ struct ViewerView: NSViewRepresentable {
             DispatchQueue.main.async {
                 switch type {
                 case "progress": self.controller.phase = .loading((body["value"] as? Double ?? 0) / 100)
-                case "loaded": self.controller.phase = .ready
-                case "mode": self.controller.mode = body["value"] as? String ?? "orbit"
+                case "loaded":
+                    self.controller.phase = .ready
+                    self.controller.focusKeys()
+                // The viewer also reports "default" and "anim"; for our two buttons
+                // everything that is not flying is orbiting.
+                case "mode": self.controller.mode = (body["value"] as? String) == "fly" ? "fly" : "orbit"
                 case "error": self.controller.phase = .failed(body["message"] as? String ?? "The viewer stopped.")
                 default: break
                 }
             }
         }
+    }
+}
+
+/// A web view that takes the keyboard when clicked, so fly mode's keys work.
+final class CrowWebView: WKWebView {
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
     }
 }
 

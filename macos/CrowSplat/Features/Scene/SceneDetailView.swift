@@ -115,6 +115,14 @@ struct SceneDetailView: View {
                     Spacer()
                     HStack {
                         ViewerControls(viewer: viewer)
+                        if viewer.mode == "fly" {
+                            // Fly mode's keys, taken from the viewer's own bindings.
+                            Text("W A S D  move   ·   Q E  down, up   ·   Shift  faster   ·   drag  look")
+                                .font(.crowCaption).foregroundStyle(Palette.ink2)
+                                .padding(.horizontal, 12).frame(height: 30)
+                                .glassPlate()
+                                .transition(.opacity)
+                        }
                         Spacer()
                         if liveRun != nil, let name = splat?.lastPathComponent {
                             Text("Preview · \(name)")

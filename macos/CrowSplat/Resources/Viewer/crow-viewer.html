@@ -42,6 +42,15 @@
     startMode: 'default'
   };
 
+  // A start camera from CrowSplat (median and 85th percentile of the splats),
+  // so floaters far outside the scene do not push the view out.
+  const vec = (k) => { const v = params.get(k); if (!v) return null;
+    const n = v.split(',').map(Number); return n.length === 3 && n.every(Number.isFinite) ? n : null; };
+  const startTarget = vec('target'), startCamera = vec('camera');
+  if (startTarget && startCamera) {
+    settings.cameras = [{ initial: { position: startCamera, target: startTarget, fov: 60 } }];
+  }
+
   let viewer = null;
 
   async function boot(renderer) {
@@ -55,14 +64,18 @@
     });
     viewer.events.on('progress:changed', (p) => post('progress', { value: p }));
     viewer.events.on('loaded:changed', (loaded) => {
-      if (loaded) { post('loaded', { renderer }); try { viewer.frameScene(); } catch (_) {} }
+      if (!loaded) return;
+      post('loaded', { renderer });
+      // With our own start camera the authored view is already right; only
+      // fall back to fitting the whole scene when we could not compute one.
+      if (!startCamera) { try { viewer.frameScene(); } catch (_) {} }
     });
     viewer.events.on('cameraMode:changed', (mode) => post('mode', { value: mode }));
   }
 
   // Commands from Swift: window.crow.frame(), .reset(), .mode('orbit' | 'fly')
   window.crow = {
-    frame: () => viewer?.frameScene(),
+    frame: () => startCamera ? viewer?.resetCamera() : viewer?.frameScene(),
     reset: () => viewer?.resetCamera(),
     mode: (m) => { if (viewer) viewer.state.cameraMode = m; }
   };

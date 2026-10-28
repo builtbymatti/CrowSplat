@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct CrowSplatApp: App {
@@ -52,6 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Finder "Open With" and drags onto the Dock icon.
+    static var open: (([URL]) -> Void)?
+    func application(_ application: NSApplication, open urls: [URL]) { Self.open?(urls) }
 }
 
 /// App-wide state: the library, engines, running jobs and where we are.
@@ -74,13 +79,20 @@ final class AppModel {
         onboarded = UserDefaults.standard.bool(forKey: "onboarded")
         jobs.onFinish = { [weak self] _ in self?.library.reload() }
         AppDelegate.jobs = jobs
+        AppDelegate.open = { [weak self] urls in self?.open(urls) }
     }
 
     /// Anything dropped or picked: captures open the new-scene sheet,
     /// splat files open straight in the viewer.
     func open(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-        pendingImport = urls
+        // Finished splats skip training: into the library and straight to the viewer.
+        let splats = urls.filter(LibraryStore.isSplat)
+        var last: SceneItem?
+        for file in splats { last = try? library.importSplat(file) }
+        if let last { destination = .scene(last.name) }
+        let captures = urls.filter { !LibraryStore.isSplat($0) }
+        if !captures.isEmpty { pendingImport = captures }
     }
 }
 
@@ -107,12 +119,13 @@ enum NewScenePicker {
     @MainActor
     static func present(model: AppModel) {
         let panel = NSOpenPanel()
-        panel.title = "Choose a video or photos"
+        panel.title = "Choose a video, photos or a splat"
         panel.prompt = "Use"
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
         panel.allowedContentTypes = [.movie, .image, .folder]
+            + LibraryStore.splatExtensions.compactMap { UTType(filenameExtension: $0) }
         if panel.runModal() == .OK { model.open(panel.urls) }
     }
 }

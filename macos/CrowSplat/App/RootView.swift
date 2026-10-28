@@ -78,7 +78,7 @@ private struct DropHighlight: View {
             .strokeBorder(Palette.ink.opacity(0.5), style: StrokeStyle(lineWidth: 1.5, dash: [6, 6]))
             .padding(14)
             .overlay {
-                Labeled("Drop to start a new scene", .add)
+                Labeled("Drop to start a scene or view a splat", .add)
                     .font(.crowHeading)
                     .foregroundStyle(Palette.ink)
                     .padding(.horizontal, 16).padding(.vertical, 10)

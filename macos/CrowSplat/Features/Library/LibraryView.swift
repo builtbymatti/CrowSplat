@@ -168,7 +168,7 @@ private struct EmptyLibrary: View {
                 .font(Typeface.sans(20, .semibold))
                 .foregroundStyle(Palette.ink)
                 .padding(.top, 8)
-            Text("A slow walk through the room works best. MP4, MOV, JPG, PNG and HEIC.")
+            Text("A slow walk through the room works best. MP4, MOV, JPG, PNG and HEIC, or a finished PLY to view it.")
                 .font(.crowBody)
                 .foregroundStyle(Palette.ink3)
                 .padding(.top, 8)

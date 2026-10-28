@@ -273,6 +273,7 @@ enum Format {
     }
 
     static func relative(_ date: Date) -> String {
+        if abs(date.timeIntervalSinceNow) < 60 { return "just now" }
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .short
         return f.localizedString(for: date, relativeTo: .now)

@@ -37,6 +37,7 @@ struct SceneItem: Identifiable, Hashable {
         switch manifest.kind {
         case "video": "Video"
         case "images": "Photos"
+        case "splat": "Splat file"
         default: "Scene"
         }
     }
@@ -105,6 +106,35 @@ final class LibraryStore {
             name = "\(stem) \(n)"; n += 1
         }
         return name
+    }
+
+    /// File types the viewer opens directly, without training.
+    static let splatExtensions: Set<String> = ["ply", "sog"]
+
+    static func isSplat(_ url: URL) -> Bool {
+        splatExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    /// Bring a finished splat into the library as a ready scene: its own
+    /// folder, the file copied in (an APFS clone, so no extra space on the
+    /// same volume) and a manifest, so it behaves like any trained scene.
+    @discardableResult
+    func importSplat(_ file: URL) throws -> SceneItem {
+        let name = uniqueName(file.deletingPathExtension().lastPathComponent)
+        let folder = self.folder.appending(path: name)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let target = folder.appending(path: file.lastPathComponent)
+        try FileManager.default.copyItem(at: file, to: target)
+        let now = Date().timeIntervalSince1970
+        let manifest: [String: Any] = [
+            "name": name, "source": file.path, "kind": "splat", "quality": "imported",
+            "status": "ready", "created": now, "updated": now,
+            "splat": target.path, "outputs": [file.pathExtension.lowercased(): target.path],
+        ]
+        try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted])
+            .write(to: folder.appending(path: "scene.json"))
+        reload()
+        return scene(named: name) ?? SceneItem(folder: folder, manifest: SceneManifest(name: name))
     }
 
     func moveToTrash(_ scene: SceneItem) {
